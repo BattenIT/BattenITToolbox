@@ -30,9 +30,21 @@ export interface Device {
   // Compliance & Security
   isCompliant?: boolean;
   vulnerabilityCount?: number;
+  criticalVulnCount?: number; // Qualys: Count of severity 4-5 vulnerabilities
+  highVulnCount?: number; // Qualys: Severity 4 vulnerabilities
+  criticalVulnCount5?: number; // Qualys: Severity 5 vulnerabilities
   missingPatches?: number;
   lastUpdateDate?: Date;
   daysSinceUpdate?: number;
+
+  // Qualys-specific fields
+  qualysAgentId?: string; // Qualys Agent ID for matching
+  qualysHostId?: string; // Qualys Host ID
+  truRiskScore?: number; // Qualys TruRisk score (0-1000)
+  criticalityScore?: number; // Asset criticality
+  lastVulnScan?: Date; // Last vulnerability scan date
+  topCVEs?: string[]; // Top CVE IDs for this device
+  qualysTags?: string[]; // Tags from Qualys (e.g., "BA - Frank Batten School")
 
   // Additional metadata
   notes?: string;
@@ -55,6 +67,11 @@ export interface DeviceSummary {
   devicesNeedingReplacement: number;
   outOfDateDevices: number;
   vulnerableDevices: number;
+  // Qualys security metrics
+  devicesWithQualysData?: number;
+  totalVulnerabilities?: number;
+  criticalVulnerabilities?: number;
+  averageTruRiskScore?: number;
 }
 
 export interface DeviceFilter {

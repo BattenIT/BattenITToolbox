@@ -4,13 +4,74 @@
  */
 
 import { Device, DeviceSummary } from '@/types/device'
-import { parseCSV, IntuneRawData, JamfRawData, BattenUserData } from './csvParser'
-import { transformJamfData, transformIntuneData, mergeDevices } from './deviceTransform'
+import { parseCSV, IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData } from './csvParser'
+import { transformJamfData, transformIntuneData, mergeDevices, mergeQualysData } from './deviceTransform'
 import IntuneCSV from '../InTune.csv'
 import JamfCSV from '../Jamf.csv'
 
 // User lookup map for matching computing IDs
 let battenUsersMap: Map<string, BattenUserData> | null = null
+
+// LocalStorage keys for uploaded CSV data
+const STORAGE_KEYS = {
+  jamf: 'battenIT_jamf_csv',
+  intune: 'battenIT_intune_csv',
+  users: 'battenIT_users_csv',
+  coreview: 'battenIT_coreview_csv',
+  qualys: 'battenIT_qualys_csv',
+}
+
+/**
+ * Save CSV data to localStorage
+ */
+export function saveCSVToStorage(type: 'jamf' | 'intune' | 'users' | 'coreview' | 'qualys', csvText: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS[type], csvText)
+    console.log(`Saved ${type} CSV to localStorage`)
+  } catch (error) {
+    console.error(`Error saving ${type} CSV to localStorage:`, error)
+    throw error
+  }
+}
+
+/**
+ * Get CSV data from localStorage or fall back to public directory
+ */
+async function getCSVData(type: 'jamf' | 'intune' | 'users' | 'coreview' | 'qualys'): Promise<string | null> {
+  // Try localStorage first
+  const stored = localStorage.getItem(STORAGE_KEYS[type])
+  if (stored) {
+    console.log(`Using uploaded ${type} CSV from localStorage`)
+    return stored
+  }
+
+  // Fall back to public directory files
+  try {
+    const fileName = type === 'jamf' ? '/Jamf.csv'
+      : type === 'intune' ? '/InTune.csv'
+      : type === 'coreview' ? '/CoreView.csv'
+      : type === 'qualys' ? '/QualysAssets.csv'
+      : '/groupExportAll_FBS_Community.csv'
+    const response = await fetch(fileName)
+    if (response.ok) {
+      console.log(`Using default ${type} CSV from ${fileName}`)
+      return await response.text()
+    }
+  } catch (error) {
+    console.warn(`Error loading default ${type} CSV:`, error)
+  }
+
+  return null
+}
+
+/**
+ * Clear all uploaded CSV data from localStorage
+ */
+export function clearUploadedCSVs(): void {
+  Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key))
+  battenUsersMap = null // Reset cache
+  console.log('Cleared all uploaded CSV data')
+}
 
 /**
  * Load Batten user data from CSV file
@@ -21,14 +82,13 @@ async function loadBattenUsers(): Promise<Map<string, BattenUserData>> {
   }
 
   try {
-    const response = await fetch('/groupExportAll_FBS_Community.csv')
-    if (!response.ok) {
+    const text = await getCSVData('users')
+    if (!text) {
       console.warn('Batten users CSV not found')
       battenUsersMap = new Map()
       return battenUsersMap
     }
 
-    const text = await response.text()
     const users = parseCSV<BattenUserData>(text)
 
     // Create map with computing ID (uid) as key
@@ -58,11 +118,11 @@ export function extractComputingIdsFromDeviceName(deviceName: string): string[] 
   // Pattern 1: FBS-{computingId}-{optional suffix} (case insensitive)
   // Pattern 2: BA-{computingId} (case insensitive)
   // Pattern 3: Email addresses
-  // Computing IDs are typically 2-7 letters followed by optional 0-3 digits
+  // Computing IDs are typically 4-7 characters with mixed letters and digits (e.g., bnw9q, hld8m, asp2d)
   const patterns = [
-    /FBS-([a-zA-Z]{2,7}\d{0,3})/g,
-    /BA-([a-zA-Z]{2,7}\d{0,3})/g,
-    /\b([a-zA-Z]{2,7}\d{0,3})@virginia\.edu/g,
+    /FBS-([a-zA-Z0-9]{4,7})(?:-|$)/g,
+    /BA-([a-zA-Z0-9]{4,7})(?:-|$|@)/g,
+    /\b([a-zA-Z0-9]{4,7})@virginia\.edu/g,
   ]
 
   patterns.forEach(pattern => {
@@ -72,10 +132,17 @@ export function extractComputingIdsFromDeviceName(deviceName: string): string[] 
       // Filter out common false positives (serial numbers, etc)
       // Real computing IDs have letters, not all uppercase serial-looking patterns
       if (id && !ids.includes(id) && id.length >= 4) {
+        console.log(`🔍 Extracted computing ID "${id}" from device "${deviceName}"`)
         ids.push(id)
+      } else if (id && id.length < 4) {
+        console.log(`⚠️  Rejected computing ID "${id}" from device "${deviceName}" (too short: ${id.length} chars)`)
       }
     }
   })
+
+  if (ids.length === 0) {
+    console.log(`ℹ️  No computing IDs found in device "${deviceName}"`)
+  }
 
   return ids
 }
@@ -88,21 +155,18 @@ export async function loadDeviceData(): Promise<Device[]> {
     // Load Batten users first
     const usersMap = await loadBattenUsers()
 
-    // Read CSV files
-    const intuneResponse = await fetch('/InTune.csv')
-    const jamfResponse = await fetch('/Jamf.csv')
+    // Get CSV data from localStorage or public directory
+    const intuneText = await getCSVData('intune')
+    const jamfText = await getCSVData('jamf')
 
-    if (!intuneResponse.ok || !jamfResponse.ok) {
-      console.warn('CSV files not found, using empty data')
+    if (!intuneText && !jamfText) {
+      console.warn('No CSV files found')
       return []
     }
 
-    const intuneText = await intuneResponse.text()
-    const jamfText = await jamfResponse.text()
-
     // Parse CSV data
-    const intuneData = parseCSV<IntuneRawData>(intuneText)
-    const jamfData = parseCSV<JamfRawData>(jamfText)
+    const intuneData = intuneText ? parseCSV<IntuneRawData>(intuneText) : []
+    const jamfData = jamfText ? parseCSV<JamfRawData>(jamfText) : []
 
     console.log(`Loaded ${intuneData.length} Intune devices`)
     console.log(`Loaded ${jamfData.length} Jamf devices`)
@@ -112,19 +176,47 @@ export async function loadDeviceData(): Promise<Device[]> {
     const jamfDevices = transformJamfData(jamfData, usersMap)
 
     // Merge devices
-    const allDevices = mergeDevices(jamfDevices, intuneDevices)
+    let allDevices = mergeDevices(jamfDevices, intuneDevices)
 
-    // Filter out devices that haven't checked in for 6+ months (180 days)
+    // Load and merge Qualys data if available
+    const qualysAssetsText = await getCSVData('qualys')
+    if (qualysAssetsText) {
+      console.log('🔒 Loading Qualys data...')
+      const qualysAssets = parseCSV<QualysAssetData>(qualysAssetsText)
+      console.log(`Loaded ${qualysAssets.length} Qualys assets`)
+
+      // Try to load vulnerabilities CSV (check for both file naming patterns)
+      let qualysVulns: QualysVulnData[] = []
+
+      // Try to get vulnerability data from localStorage or public directory
+      // User might upload "BA_Sev4-5_Vulnerabilities_All_By_Host.csv"
+      try {
+        const vulnFileName = '/BA_Sev4-5_Vulnerabilities_All_By_Host.csv'
+        const response = await fetch(vulnFileName)
+        if (response.ok) {
+          const vulnText = await response.text()
+          qualysVulns = parseCSV<QualysVulnData>(vulnText)
+          console.log(`Loaded ${qualysVulns.length} Qualys vulnerabilities from ${vulnFileName}`)
+        }
+      } catch (error) {
+        console.log('No Qualys vulnerabilities file found - continuing with assets only')
+      }
+
+      // Merge Qualys data
+      allDevices = mergeQualysData(allDevices, qualysAssets, qualysVulns)
+    }
+
+    // Filter out devices that haven't checked in for 3+ months (90 days)
     const activeDevices = allDevices.filter(device => {
       const daysSinceUpdate = device.daysSinceUpdate || 0
-      if (daysSinceUpdate > 180) {
-        console.log(`🗑️  Filtering out device ${device.name}: last seen ${daysSinceUpdate} days ago (> 6 months)`)
+      if (daysSinceUpdate > 90) {
+        console.log(`🗑️  Filtering out device ${device.name}: last seen ${daysSinceUpdate} days ago (> 3 months)`)
         return false
       }
       return true
     })
 
-    console.log(`Total devices (filtered): ${activeDevices.length} (excluded ${allDevices.length - activeDevices.length} devices not seen in 6+ months)`)
+    console.log(`Total devices (filtered): ${activeDevices.length} (excluded ${allDevices.length - activeDevices.length} devices not seen in 3+ months)`)
     return activeDevices
   } catch (error) {
     console.error('Error loading device data:', error)
@@ -148,13 +240,25 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
   const activeDevices = devices.filter(d => d.activityStatus === 'active').length
   const inactiveDevices = devices.filter(d => d.activityStatus === 'inactive').length
 
-  const averageAge = devices.length > 0
-    ? devices.reduce((sum, d) => sum + d.ageInYears, 0) / devices.length
+  // Calculate average age only for devices where we know the age (exclude 0 years)
+  const devicesWithKnownAge = devices.filter(d => d.ageInYears > 0)
+  const averageAge = devicesWithKnownAge.length > 0
+    ? devicesWithKnownAge.reduce((sum, d) => sum + d.ageInYears, 0) / devicesWithKnownAge.length
     : 0
 
   const devicesNeedingReplacement = devices.filter(d => d.replacementRecommended).length
   const outOfDateDevices = devices.filter(d => (d.daysSinceUpdate || 0) > 30).length
   const vulnerableDevices = devices.filter(d => (d.vulnerabilityCount || 0) > 5).length
+
+  // Qualys security metrics
+  const devicesWithQualys = devices.filter(d => d.qualysAgentId)
+  const devicesWithQualysData = devicesWithQualys.length
+  const totalVulnerabilities = devicesWithQualys.reduce((sum, d) => sum + (d.vulnerabilityCount || 0), 0)
+  const criticalVulnerabilities = devicesWithQualys.reduce((sum, d) => sum + (d.criticalVulnCount || 0), 0)
+  const devicesWithTruRisk = devicesWithQualys.filter(d => d.truRiskScore !== undefined)
+  const averageTruRiskScore = devicesWithTruRisk.length > 0
+    ? devicesWithTruRisk.reduce((sum, d) => sum + (d.truRiskScore || 0), 0) / devicesWithTruRisk.length
+    : undefined
 
   return {
     totalDevices,
@@ -169,6 +273,10 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
     devicesNeedingReplacement,
     outOfDateDevices,
     vulnerableDevices,
+    devicesWithQualysData,
+    totalVulnerabilities,
+    criticalVulnerabilities,
+    averageTruRiskScore: averageTruRiskScore ? parseFloat(averageTruRiskScore.toFixed(1)) : undefined,
   }
 }
 

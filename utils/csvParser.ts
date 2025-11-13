@@ -43,6 +43,55 @@ export interface BattenUserData {
   errorMessage: string
 }
 
+export interface QualysAssetData {
+  'Asset ID': string
+  'Host ID': string
+  'Agent ID': string
+  'Asset Name': string
+  'NetBIOS Name': string
+  'MAC Address': string
+  'IP addresses': string
+  'Operating System': string
+  'Operating System Version': string
+  'Hardware Category': string
+  'Hardware': string
+  'Processor Count': string
+  'Total Memory': string
+  'Installed Software': string
+  'TruRisk Score': string
+  'CriticalityScore': string
+  'Tags': string
+  'Modules': string
+  'Last System Boot': string
+  'Last Logged On User': string
+  'Network GUID': string
+  'Asset UUID': string
+  'Created': string
+  'Modified': string
+  'Last Vuln Scan': string
+  'Last Compliance Scan': string
+  'Last Full Scan': string
+  'Last VM Scan': string
+}
+
+export interface QualysVulnData {
+  'IP': string
+  'DNS': string
+  'NetBIOS': string
+  'QG Host ID': string
+  'QID': string
+  'Title': string
+  'Severity': string
+  'CVE ID': string
+  'Vuln Status': string
+  'First Detected': string
+  'Last Detected': string
+  'QDS': string
+  'ARS': string
+  'ACS': string
+  'TruRisk Score': string
+}
+
 /**
  * Parse CSV string into array of objects
  */

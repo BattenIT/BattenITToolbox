@@ -4,8 +4,33 @@
  */
 
 import { Device, DeviceStatus, OSType } from '@/types/device'
-import { IntuneRawData, JamfRawData, BattenUserData, parseDate, yearsBetween, daysBetween } from './csvParser'
+import { IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData, parseDate, yearsBetween, daysBetween } from './csvParser'
 import { extractComputingIdsFromDeviceName } from './dataLoader'
+
+/**
+ * IT staff who provision devices (should not be primary owners)
+ * When these users appear as primary owners, swap with actual user from device name
+ */
+const IT_PROVISIONERS = new Set([
+  'bh4hb',
+  'jww8je',
+  'bh4hb@virginia.edu',
+  'jww8je@virginia.edu',
+  'Jeffrey Wayne Whelchel',
+  'Whelchel, Jeffrey Wayne',
+  'Hartless, Ben',
+  'Ben Hartless',
+])
+
+/**
+ * Check if a user is an IT provisioner (should not be primary owner)
+ */
+function isITProvisioner(owner: string, email?: string): boolean {
+  if (IT_PROVISIONERS.has(owner)) return true
+  if (email && IT_PROVISIONERS.has(email)) return true
+  if (email && IT_PROVISIONERS.has(email.split('@')[0])) return true
+  return false
+}
 
 /**
  * Transform Jamf CSV data into Device objects
@@ -29,6 +54,19 @@ export function transformJamfData(jamfData: JamfRawData[], usersMap?: Map<string
       ageInYears = yearsBetween(purchaseDate, now)
     }
 
+    // If no warranty date, try to extract year from model name (e.g., "MacBook Pro (M1, 2020)")
+    if (!purchaseDate && raw.Model) {
+      const modelYearMatch = raw.Model.match(/\b(20[1-2]\d)\b/)
+      if (modelYearMatch) {
+        const year = parseInt(modelYearMatch[1])
+        if (year >= 2015 && year <= 2030) {
+          purchaseDate = new Date(year, 0, 1)
+          ageInYears = yearsBetween(purchaseDate, now)
+          console.log(`📅 Extracted year ${year} from model "${raw.Model}" for device ${raw['Computer Name']}`)
+        }
+      }
+    }
+
     // Extract OS version
     const osVersion = raw['Operating System Version'] || 'Unknown'
     const osType: OSType = 'macOS'
@@ -43,6 +81,7 @@ export function transformJamfData(jamfData: JamfRawData[], usersMap?: Map<string
     if (usersMap && raw['Computer Name']) {
       const computingIds = extractComputingIdsFromDeviceName(raw['Computer Name'])
       if (computingIds.length > 0) {
+        console.log(`🔎 Attempting to match computing IDs [${computingIds.join(', ')}] for device "${raw['Computer Name']}"`)
         for (const computingId of computingIds) {
           const matchedUser = usersMap.get(computingId)
           if (matchedUser) {
@@ -50,6 +89,8 @@ export function transformJamfData(jamfData: JamfRawData[], usersMap?: Map<string
             additionalOwner = matchedUser.name || matchedUser.mail
             console.log(`✓ Added additional owner for device ${raw['Computer Name']}: ${matchedUser.name} (${computingId})`)
             break // Use first match
+          } else {
+            console.log(`❌ No match found in directory for computing ID "${computingId}" (device: ${raw['Computer Name']})`)
           }
         }
       }
@@ -64,6 +105,23 @@ export function transformJamfData(jamfData: JamfRawData[], usersMap?: Map<string
         additionalOwner = matchedUser.name || matchedUser.mail
         console.log(`✓ Added additional owner via email for device ${raw['Computer Name']}: ${matchedUser.name} (${emailId})`)
       }
+    }
+
+    // Swap primary and additional owner if needed
+    let finalOwner = owner
+    let finalAdditionalOwner = additionalOwner
+
+    // Case 1: Primary is IT provisioner - swap with actual user
+    if (isITProvisioner(owner, emailAddress) && additionalOwner) {
+      finalOwner = additionalOwner
+      finalAdditionalOwner = `${owner} (IT Provisioner)`
+      console.log(`🔄 Swapped owners for device ${raw['Computer Name']}: ${finalOwner} is now primary, ${owner} is IT provisioner`)
+    }
+    // Case 2: Primary is "Unassigned" but we found a real user - promote to primary
+    else if (owner === 'Unassigned' && additionalOwner) {
+      finalOwner = additionalOwner
+      finalAdditionalOwner = undefined
+      console.log(`🔄 Promoted user for device ${raw['Computer Name']}: ${finalOwner} is now primary (was Unassigned)`)
     }
 
     // Calculate days since last update
@@ -84,9 +142,9 @@ export function transformJamfData(jamfData: JamfRawData[], usersMap?: Map<string
     const device: Device = {
       id: `jamf-${raw['Serial Number'] || index}`,
       name: raw['Computer Name'] || `Unknown-${index}`,
-      owner,
+      owner: finalOwner,
       ownerEmail: emailAddress,
-      additionalOwner,
+      additionalOwner: finalAdditionalOwner,
       department: raw.Department || undefined,
       osType,
       osVersion,
@@ -132,6 +190,7 @@ export function transformIntuneData(intuneData: IntuneRawData[], usersMap?: Map<
     if (usersMap && raw.DeviceName) {
       const computingIds = extractComputingIdsFromDeviceName(raw.DeviceName)
       if (computingIds.length > 0) {
+        console.log(`🔎 Attempting to match computing IDs [${computingIds.join(', ')}] for device "${raw.DeviceName}"`)
         for (const computingId of computingIds) {
           const matchedUser = usersMap.get(computingId)
           if (matchedUser) {
@@ -139,6 +198,8 @@ export function transformIntuneData(intuneData: IntuneRawData[], usersMap?: Map<
             additionalOwner = matchedUser.name || matchedUser.mail
             console.log(`✓ Added additional owner for device ${raw.DeviceName}: ${matchedUser.name} (${computingId})`)
             break // Use first match
+          } else {
+            console.log(`❌ No match found in directory for computing ID "${computingId}" (device: ${raw.DeviceName})`)
           }
         }
       }
@@ -155,19 +216,43 @@ export function transformIntuneData(intuneData: IntuneRawData[], usersMap?: Map<
       }
     }
 
+    // Swap primary and additional owner if needed
+    let finalOwner = owner
+    let finalAdditionalOwner = additionalOwner
+
+    // Case 1: Primary is IT provisioner - swap with actual user
+    if (isITProvisioner(owner, emailAddress) && additionalOwner) {
+      finalOwner = additionalOwner
+      finalAdditionalOwner = `${owner} (IT Provisioner)`
+      console.log(`🔄 Swapped owners for device ${raw.DeviceName}: ${finalOwner} is now primary, ${owner} is IT provisioner`)
+    }
+    // Case 2: Primary is "Unassigned" but we found a real user - promote to primary
+    else if (owner === 'Unassigned' && additionalOwner) {
+      finalOwner = additionalOwner
+      finalAdditionalOwner = undefined
+      console.log(`🔄 Promoted user for device ${raw.DeviceName}: ${finalOwner} is now primary (was Unassigned)`)
+    }
+
     // Calculate days since last update
     const daysSinceUpdate = daysBetween(lastModified, now)
 
     // We don't have age data from Intune CSV, so estimate based on device name patterns
     // FBS-* devices with years in name like "2022", "2023", etc.
-    const yearMatch = raw.DeviceName.match(/-(\d{4})/)
+    // Only match realistic years (2015-2030) to avoid matching serial numbers
+    const yearMatch = raw.DeviceName.match(/-(20[1-3]\d)(?:-|$)/g)
     let ageInYears = 0
     let purchaseDate: Date | undefined
 
-    if (yearMatch) {
-      const year = parseInt(yearMatch[1])
-      purchaseDate = new Date(year, 0, 1)
-      ageInYears = yearsBetween(purchaseDate, now)
+    if (yearMatch && yearMatch.length > 0) {
+      // Extract the year from the match (remove the leading hyphen)
+      const yearStr = yearMatch[0].replace(/-/g, '')
+      const year = parseInt(yearStr)
+
+      // Validate it's a reasonable year (2015-2030)
+      if (year >= 2015 && year <= 2030) {
+        purchaseDate = new Date(year, 0, 1)
+        ageInYears = yearsBetween(purchaseDate, now)
+      }
     }
 
     // Determine OS type from device naming convention
@@ -191,9 +276,9 @@ export function transformIntuneData(intuneData: IntuneRawData[], usersMap?: Map<
     const device: Device = {
       id: `intune-${raw.DeviceName}-${index}`,
       name: raw.DeviceName || `Unknown-${index}`,
-      owner,
+      owner: finalOwner,
       ownerEmail: emailAddress || undefined,
-      additionalOwner,
+      additionalOwner: finalAdditionalOwner,
       osType,
       osVersion,
       model,
@@ -327,9 +412,13 @@ function determineDeviceStatusWithReasons(
 
 /**
  * Determine if a device should be replaced (Batten 3-year policy)
+ * Devices older than 5 years are excluded as they are likely retired machines still in use
  */
 function shouldReplace(ageInYears: number, osVersion: string, model: string): boolean {
-  // Replace if older than 3 years (Batten policy)
+  // Exclude devices older than 5 years (likely retired machines still in use)
+  if (ageInYears > 5) return false
+
+  // Replace if 3-5 years old (Batten policy)
   if (ageInYears >= 3) return true
 
   // Replace if running very old OS that can't be updated
@@ -340,11 +429,12 @@ function shouldReplace(ageInYears: number, osVersion: string, model: string): bo
 
 /**
  * Get reason for replacement recommendation (Batten 3-year policy)
+ * Devices older than 5 years are excluded as they are likely retired machines still in use
  */
 function getReplacementReason(ageInYears: number, osVersion: string, model: string): string {
   const reasons: string[] = []
 
-  if (ageInYears >= 3) {
+  if (ageInYears >= 3 && ageInYears <= 5) {
     reasons.push(`Device age is ${ageInYears.toFixed(1)} years (exceeds Batten 3-year replacement policy)`)
   }
 
@@ -369,7 +459,7 @@ export function mergeDevices(jamfDevices: Device[], intuneDevices: Device[]): De
 
   // Sort by status priority (critical first) then by age
   return allDevices.sort((a, b) => {
-    const statusPriority = { critical: 0, warning: 1, good: 2, unknown: 3 }
+    const statusPriority = { critical: 0, warning: 1, good: 2, unknown: 3, inactive: 4 }
     const priorityDiff = statusPriority[a.status] - statusPriority[b.status]
 
     if (priorityDiff !== 0) return priorityDiff
@@ -377,4 +467,217 @@ export function mergeDevices(jamfDevices: Device[], intuneDevices: Device[]): De
     // Within same status, sort by age (oldest first)
     return b.ageInYears - a.ageInYears
   })
+}
+
+/**
+ * Merge Qualys asset and vulnerability data with existing devices
+ */
+export function mergeQualysData(
+  devices: Device[],
+  qualysAssets: QualysAssetData[],
+  qualysVulns: QualysVulnData[]
+): Device[] {
+  console.log(`🔒 Merging Qualys data: ${qualysAssets.length} assets, ${qualysVulns.length} vulnerabilities`)
+
+  // Create maps for efficient lookups
+  const assetMap = new Map<string, QualysAssetData>()
+  const vulnMap = new Map<string, QualysVulnData[]>()
+
+  // Index assets by Agent ID
+  qualysAssets.forEach(asset => {
+    if (asset['Agent ID']) {
+      assetMap.set(asset['Agent ID'].toLowerCase(), asset)
+    }
+  })
+
+  // Group vulnerabilities by QG Host ID (maps to Agent ID)
+  qualysVulns.forEach(vuln => {
+    const hostId = vuln['QG Host ID']
+    if (!hostId) return
+
+    if (!vulnMap.has(hostId)) {
+      vulnMap.set(hostId, [])
+    }
+    vulnMap.get(hostId)!.push(vuln)
+  })
+
+  console.log(`📊 Indexed ${assetMap.size} Qualys assets and ${vulnMap.size} hosts with vulnerabilities`)
+
+  // Match devices to Qualys data
+  const mergedDevices = devices.map(device => {
+    let qualysAsset: QualysAssetData | undefined
+    let deviceVulns: QualysVulnData[] = []
+
+    // Try multiple matching strategies
+
+    // Strategy 1: Match by device name to Asset Name or NetBIOS Name (exact match)
+    if (!qualysAsset) {
+      for (const [agentId, asset] of assetMap.entries()) {
+        const assetName = (asset['Asset Name'] || '').toLowerCase()
+        const netbiosName = (asset['NetBIOS Name'] || '').toLowerCase()
+        const deviceName = device.name.toLowerCase()
+
+        if (assetName && assetName === deviceName) {
+          qualysAsset = asset
+          console.log(`✓ Matched device "${device.name}" to Qualys asset via Asset Name (exact)`)
+          break
+        }
+        if (netbiosName && netbiosName === deviceName) {
+          qualysAsset = asset
+          console.log(`✓ Matched device "${device.name}" to Qualys asset via NetBIOS Name (exact)`)
+          break
+        }
+      }
+    }
+
+    // Strategy 2: Match by computing ID extracted from device owner/name
+    if (!qualysAsset && (device.owner || device.ownerEmail || device.additionalOwner)) {
+      // Try to extract computing ID from device's owner information
+      let deviceComputingIds: string[] = []
+
+      // Get computing IDs from device name
+      deviceComputingIds = extractComputingIdsFromDeviceName(device.name)
+
+      // Also try from owner email
+      if (device.ownerEmail) {
+        const emailId = device.ownerEmail.split('@')[0].toLowerCase()
+        if (emailId.length >= 4 && emailId.length <= 7) {
+          deviceComputingIds.push(emailId)
+        }
+      }
+
+      // Now try to match with Qualys assets by their "Last Logged On User"
+      if (deviceComputingIds.length > 0) {
+        for (const [agentId, asset] of assetMap.entries()) {
+          const lastLoggedOnUser = (asset['Last Logged On User'] || '').toLowerCase()
+
+          // Check if any of the device's computing IDs appear in the Qualys logged on user
+          for (const computingId of deviceComputingIds) {
+            if (lastLoggedOnUser.includes(computingId)) {
+              qualysAsset = asset
+              console.log(`✓ Matched device "${device.name}" to Qualys asset via computing ID "${computingId}" in Last Logged On User: "${lastLoggedOnUser}"`)
+              break
+            }
+          }
+          if (qualysAsset) break
+        }
+      }
+    }
+
+    // Strategy 3: Match by partial hostname (e.g., "FBS-abc123-2023" matches "FBS-abc123")
+    if (!qualysAsset) {
+      const deviceName = device.name.toLowerCase()
+
+      for (const [agentId, asset] of assetMap.entries()) {
+        const assetName = (asset['Asset Name'] || '').toLowerCase()
+        const netbiosName = (asset['NetBIOS Name'] || '').toLowerCase()
+
+        // Try partial matches - check if one contains the other
+        if (assetName && (deviceName.includes(assetName) || assetName.includes(deviceName))) {
+          qualysAsset = asset
+          console.log(`✓ Matched device "${device.name}" to Qualys asset via Asset Name (partial): "${asset['Asset Name']}"`)
+          break
+        }
+        if (netbiosName && (deviceName.includes(netbiosName) || netbiosName.includes(deviceName))) {
+          qualysAsset = asset
+          console.log(`✓ Matched device "${device.name}" to Qualys asset via NetBIOS Name (partial): "${asset['NetBIOS Name']}"`)
+          break
+        }
+      }
+    }
+
+    // Strategy 4: Match by serial number (if available in Qualys data)
+    // Note: QualysAssets.csv doesn't have serial number field, but keeping this for future
+
+    // Strategy 5: Match by MAC address
+    if (!qualysAsset && device.serialNumber) {
+      // This would require MAC address from device data, which we don't have in current CSVs
+      // Keeping placeholder for future enhancement
+    }
+
+    // If we found an asset, get its vulnerabilities
+    if (qualysAsset) {
+      const agentId = qualysAsset['Agent ID']
+      deviceVulns = vulnMap.get(agentId) || []
+
+      // Parse Qualys data
+      const truRiskScore = parseInt(qualysAsset['TruRisk Score']) || undefined
+      const criticalityScore = parseInt(qualysAsset['CriticalityScore']) || undefined
+      const lastVulnScan = parseDate(qualysAsset['Last Vuln Scan']) || undefined
+
+      // Count vulnerabilities by severity
+      const criticalVulns = deviceVulns.filter(v => v.Severity === '5')
+      const highVulns = deviceVulns.filter(v => v.Severity === '4')
+      const allCriticalHigh = deviceVulns.filter(v => v.Severity === '4' || v.Severity === '5')
+
+      // Extract top CVEs (up to 5)
+      const topCVEs = allCriticalHigh
+        .filter(v => v['CVE ID'])
+        .map(v => v['CVE ID'])
+        .slice(0, 5)
+
+      // Parse tags
+      const qualysTags = qualysAsset.Tags
+        ? qualysAsset.Tags.split(',').map(t => t.trim())
+        : []
+
+      // Try to extract computing ID from Qualys "Last Logged On User" field
+      // This could be something like "BATTENBUS\bh4hb" or "bh4hb" or "Batten\abc3xy"
+      let qualysComputingId: string | undefined
+      const lastLoggedOnUser = qualysAsset['Last Logged On User'] || ''
+
+      if (lastLoggedOnUser) {
+        // Try patterns like "DOMAIN\username" or just "username"
+        const patterns = [
+          /\\([a-zA-Z0-9]{4,7})$/,  // Match after backslash (e.g., "BATTENBUS\bh4hb")
+          /^([a-zA-Z0-9]{4,7})$/,    // Match standalone computing ID
+        ]
+
+        for (const pattern of patterns) {
+          const match = lastLoggedOnUser.match(pattern)
+          if (match) {
+            qualysComputingId = match[1].toLowerCase()
+            console.log(`🔍 Extracted computing ID "${qualysComputingId}" from Qualys Last Logged On User: "${lastLoggedOnUser}"`)
+            break
+          }
+        }
+      }
+
+      // If we found a computing ID from Qualys that's different from current owners, add as note
+      let additionalNotes: string | undefined
+      if (qualysComputingId &&
+          !device.owner?.toLowerCase().includes(qualysComputingId) &&
+          !device.ownerEmail?.toLowerCase().includes(qualysComputingId) &&
+          !device.additionalOwner?.toLowerCase().includes(qualysComputingId)) {
+        additionalNotes = `Qualys last logged on user: ${lastLoggedOnUser}`
+        console.log(`ℹ️  Device "${device.name}" - Qualys shows different user: ${lastLoggedOnUser}`)
+      }
+
+      console.log(`🔒 Device "${device.name}": ${deviceVulns.length} total vulns (${criticalVulns.length} critical, ${highVulns.length} high), TruRisk: ${truRiskScore}`)
+
+      // Update device with Qualys data
+      return {
+        ...device,
+        qualysAgentId: agentId,
+        qualysHostId: qualysAsset['Host ID'],
+        truRiskScore,
+        criticalityScore,
+        lastVulnScan,
+        vulnerabilityCount: deviceVulns.length,
+        criticalVulnCount: allCriticalHigh.length,
+        highVulnCount: highVulns.length,
+        criticalVulnCount5: criticalVulns.length,
+        topCVEs,
+        qualysTags,
+        notes: additionalNotes ? (device.notes ? `${device.notes}; ${additionalNotes}` : additionalNotes) : device.notes,
+      }
+    }
+
+    return device
+  })
+
+  const matchedCount = mergedDevices.filter(d => d.qualysAgentId).length
+  console.log(`✅ Matched ${matchedCount} of ${devices.length} devices to Qualys data`)
+
+  return mergedDevices
 }
