@@ -57,7 +57,12 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
   const criticalCount = devices.filter(d => d.status === 'critical').length
   const warningCount = devices.filter(d => d.status === 'warning').length
   const goodCount = devices.filter(d => d.status === 'good').length
+  const inactiveCount = devices.filter(d => d.status === 'inactive').length
   const unknownCount = devices.filter(d => d.status === 'unknown').length
+
+  // Activity status counts
+  const activeDevices = devices.filter(d => d.activityStatus === 'active').length
+  const inactiveDevices = devices.filter(d => d.activityStatus === 'inactive').length
 
   const averageAge = devices.length > 0
     ? devices.reduce((sum, d) => sum + d.ageInYears, 0) / devices.length
@@ -72,7 +77,10 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
     criticalCount,
     warningCount,
     goodCount,
+    inactiveCount,
     unknownCount,
+    activeDevices,
+    inactiveDevices,
     averageAge: parseFloat(averageAge.toFixed(1)),
     devicesNeedingReplacement,
     outOfDateDevices,

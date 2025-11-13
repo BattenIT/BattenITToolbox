@@ -1,4 +1,5 @@
-export type DeviceStatus = 'critical' | 'warning' | 'good' | 'unknown';
+export type DeviceStatus = 'critical' | 'warning' | 'good' | 'inactive' | 'unknown';
+export type ActivityStatus = 'active' | 'inactive';
 export type DeviceSource = 'jamf' | 'intune' | 'qualys' | 'coreview';
 export type OSType = 'macOS' | 'Windows' | 'iOS' | 'Android' | 'Unknown';
 
@@ -17,6 +18,7 @@ export interface Device {
   lastSeen: Date;
   ageInYears: number;
   status: DeviceStatus;
+  activityStatus: ActivityStatus;
   source: DeviceSource;
 
   // Hardware specs
@@ -44,7 +46,10 @@ export interface DeviceSummary {
   criticalCount: number;
   warningCount: number;
   goodCount: number;
+  inactiveCount: number;
   unknownCount: number;
+  activeDevices: number;
+  inactiveDevices: number;
   averageAge: number;
   devicesNeedingReplacement: number;
   outOfDateDevices: number;

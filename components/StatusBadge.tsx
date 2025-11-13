@@ -1,7 +1,7 @@
 "use client"
 
 import { DeviceStatus } from '@/types/device'
-import { AlertCircle, AlertTriangle, CheckCircle, HelpCircle } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, HelpCircle, Clock } from 'lucide-react'
 
 interface StatusBadgeProps {
   status: DeviceStatus
@@ -31,6 +31,13 @@ export default function StatusBadge({ status, showIcon = false, size = 'md' }: S
       border: 'border-green-200',
       icon: CheckCircle,
       iconColor: 'text-green-500',
+    },
+    inactive: {
+      bg: 'bg-gray-50',
+      text: 'text-gray-700',
+      border: 'border-gray-300',
+      icon: Clock,
+      iconColor: 'text-gray-500',
     },
     unknown: {
       bg: 'bg-gray-50',

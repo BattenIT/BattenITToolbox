@@ -63,6 +63,15 @@ export default function Home() {
       borderColor: 'border-green-200',
       iconGradient: 'from-green-500 to-green-600',
     },
+    {
+      label: 'Inactive',
+      value: summary.inactiveCount,
+      subtext: 'Not checked in 30+ days',
+      icon: Clock,
+      bgColor: 'bg-white',
+      borderColor: 'border-gray-200',
+      iconGradient: 'from-gray-500 to-gray-600',
+    },
   ]
 
   const additionalMetrics: MetricCardData[] = [
@@ -162,7 +171,7 @@ export default function Home() {
                 <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
                   Device Health Overview
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   {metricCards.map((card, index) => (
                     <MetricCard
                       key={card.label}
@@ -192,7 +201,7 @@ export default function Home() {
               {/* Device Table - Show all devices or filter to needing attention */}
               <div className="mb-12 animate-fade-in">
                 <DeviceTable
-                  devices={devices.filter(d => d.status === 'critical' || d.status === 'warning')}
+                  devices={devices.filter(d => d.status === 'critical' || d.status === 'warning' || d.status === 'inactive')}
                   title="Devices Needing Attention"
                   showExport={true}
                 />
@@ -203,13 +212,21 @@ export default function Home() {
                 <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
                   Device Statistics
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-white rounded-xl shadow-lg border-2 border-gray-100 p-6">
                     <h3 className="text-sm font-semibold text-gray-600 mb-2">Average Device Age</h3>
                     <p className="text-4xl font-serif font-bold text-uva-navy">
                       {summary.averageAge.toFixed(1)}
                     </p>
                     <p className="text-sm text-gray-500 mt-1">years</p>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-lg border-2 border-gray-100 p-6">
+                    <h3 className="text-sm font-semibold text-gray-600 mb-2">Active Devices</h3>
+                    <p className="text-4xl font-serif font-bold text-uva-navy">
+                      {summary.activeDevices}
+                    </p>
+                    <p className="text-sm text-gray-500 mt-1">checked in recently</p>
                   </div>
 
                   <div className="bg-white rounded-xl shadow-lg border-2 border-gray-100 p-6">

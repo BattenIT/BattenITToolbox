@@ -41,14 +41,14 @@ export function transformJamfData(jamfData: JamfRawData[]): Device[] {
     const daysSinceUpdate = daysBetween(lastInventoryUpdate, now)
 
     // Determine device status with detailed reasons
-    const { status, statusReason, statusReasons } = determineDeviceStatusWithReasons(
+    const { status, statusReason, statusReasons, activityStatus } = determineDeviceStatusWithReasons(
       ageInYears,
       daysSinceUpdate,
       osVersion,
       raw.Model
     )
 
-    // Check if replacement is recommended
+    // Check if replacement is recommended (3+ years per Batten policy)
     const replacementRecommended = shouldReplace(ageInYears, osVersion, raw.Model)
     const replacementReason = getReplacementReason(ageInYears, osVersion, raw.Model)
 
@@ -67,6 +67,7 @@ export function transformJamfData(jamfData: JamfRawData[]): Device[] {
       lastSeen: lastCheckIn,
       ageInYears: parseFloat(ageInYears.toFixed(1)),
       status,
+      activityStatus,
       source: 'jamf',
       processor: raw['Processor Type'] || undefined,
       isCompliant: raw.Managed === 'Managed' && raw.Supervised === 'Yes',
@@ -118,14 +119,14 @@ export function transformIntuneData(intuneData: IntuneRawData[]): Device[] {
     const model = 'Surface Pro / Dell' // Generic - not available in CSV
 
     // Determine device status with detailed reasons
-    const { status, statusReason, statusReasons } = determineDeviceStatusWithReasons(
+    const { status, statusReason, statusReasons, activityStatus } = determineDeviceStatusWithReasons(
       ageInYears,
       daysSinceUpdate,
       osVersion,
       model
     )
 
-    // Check if replacement is recommended
+    // Check if replacement is recommended (3+ years per Batten policy)
     const replacementRecommended = shouldReplace(ageInYears, osVersion, raw.DeviceName)
     const replacementReason = getReplacementReason(ageInYears, osVersion, raw.DeviceName)
 
@@ -140,6 +141,7 @@ export function transformIntuneData(intuneData: IntuneRawData[]): Device[] {
       lastSeen: lastModified,
       ageInYears: parseFloat(ageInYears.toFixed(1)),
       status,
+      activityStatus,
       source: 'intune',
       purchaseDate,
       isCompliant: raw.ReportStatus === 'Succeeded',
@@ -183,63 +185,76 @@ function determineDeviceStatus(
 
 /**
  * Determine device status with detailed reasons for administrators
+ * Updated criteria:
+ * - Inactive: Not checked in for 30+ days
+ * - Critical: Age >= 3 years (Batten replacement policy)
+ * - Warning: Age >= 2 years (approaching replacement)
+ * - Good: Age < 2 years and active
  */
 function determineDeviceStatusWithReasons(
   ageInYears: number,
   daysSinceUpdate: number,
   osVersion: string,
   model: string
-): { status: DeviceStatus; statusReason: string; statusReasons: string[] } {
+): { status: DeviceStatus; statusReason: string; statusReasons: string[]; activityStatus: ActivityStatus } {
   const reasons: string[] = []
   let status: DeviceStatus = 'good'
 
-  // Check critical factors
-  if (ageInYears >= 5) {
-    status = 'critical'
-    reasons.push(`Device is ${ageInYears.toFixed(1)} years old (exceeds 5-year lifecycle)`)
-  }
+  // Determine activity status first (30 days = inactive per Batten policy)
+  const activityStatus: ActivityStatus = daysSinceUpdate > 30 ? 'inactive' : 'active'
 
-  if (daysSinceUpdate > 90) {
-    status = 'critical'
-    reasons.push(`Device has not checked in for ${daysSinceUpdate} days (critical threshold: 90 days)`)
-  }
+  // Check for inactive devices (not checked in for 30+ days)
+  if (daysSinceUpdate > 30) {
+    status = 'inactive'
+    reasons.push(`Device has not checked in for ${daysSinceUpdate} days (inactive threshold: 30 days)`)
+    reasons.push('Device may be lost, stolen, decommissioned, or user has left organization')
+  } else {
+    // Check critical factors (active devices only)
 
-  if (osVersion.includes('10.')) {
-    status = 'critical'
-    reasons.push('Running macOS 10.x which is no longer supported by Apple')
-  }
-
-  // Check warning factors (only if not already critical)
-  if (status !== 'critical') {
+    // Age >= 3 years = CRITICAL (Batten replacement policy)
     if (ageInYears >= 3) {
-      status = 'warning'
-      reasons.push(`Device is ${ageInYears.toFixed(1)} years old (approaching 5-year replacement cycle)`)
+      status = 'critical'
+      reasons.push(`Device is ${ageInYears.toFixed(1)} years old (exceeds 3-year replacement policy)`)
+      reasons.push('Eligible for immediate replacement under Batten IT policy')
     }
 
-    if (daysSinceUpdate > 30) {
-      status = 'warning'
-      reasons.push(`Device last updated ${daysSinceUpdate} days ago (recommended: within 30 days)`)
+    // Unsupported OS = CRITICAL
+    if (osVersion.includes('10.')) {
+      status = 'critical'
+      reasons.push('Running macOS 10.x which is no longer supported by Apple')
     }
 
-    if (osVersion.includes('11.')) {
-      status = 'warning'
-      reasons.push('Running macOS 11 which is aging and should be upgraded')
-    }
-
-    if (model.includes('Intel') && !model.includes('M1') && !model.includes('M2') && !model.includes('M3') && !model.includes('M4')) {
-      if (model.includes('2017') || model.includes('2018') || model.includes('2019')) {
+    // Check warning factors (only if not already critical)
+    if (status !== 'critical') {
+      // Age 2-3 years = WARNING (approaching replacement)
+      if (ageInYears >= 2) {
         status = 'warning'
-        reasons.push('Intel-based Mac from 2017-2019 (Apple Silicon offers better performance and efficiency)')
+        reasons.push(`Device is ${ageInYears.toFixed(1)} years old (approaching 3-year replacement cycle)`)
+        reasons.push('Should be budgeted for replacement in next fiscal year')
+      }
+
+      // Aging OS = WARNING
+      if (osVersion.includes('11.') || osVersion.includes('12.')) {
+        status = 'warning'
+        reasons.push(`Running macOS ${osVersion} which should be upgraded to latest version`)
+      }
+
+      // Old Intel Macs = WARNING
+      if (model.includes('Intel') && !model.includes('M1') && !model.includes('M2') && !model.includes('M3') && !model.includes('M4')) {
+        if (model.includes('2017') || model.includes('2018') || model.includes('2019') || model.includes('2020')) {
+          status = 'warning'
+          reasons.push('Intel-based Mac (Apple Silicon offers better performance and efficiency)')
+        }
       }
     }
-  }
 
-  // If still good, add positive reasons
-  if (status === 'good') {
-    reasons.push(`Device is ${ageInYears.toFixed(1)} years old (within recommended lifecycle)`)
-    reasons.push(`Device updated ${daysSinceUpdate} days ago (current and compliant)`)
-    if (model.includes('M1') || model.includes('M2') || model.includes('M3') || model.includes('M4')) {
-      reasons.push('Running Apple Silicon (modern, efficient hardware)')
+    // If still good, add positive reasons
+    if (status === 'good') {
+      reasons.push(`Device is ${ageInYears.toFixed(1)} years old (within 3-year lifecycle)`)
+      reasons.push(`Device checked in ${daysSinceUpdate} days ago (active and current)`)
+      if (model.includes('M1') || model.includes('M2') || model.includes('M3') || model.includes('M4')) {
+        reasons.push('Running Apple Silicon (modern, efficient hardware)')
+      }
     }
   }
 
@@ -248,38 +263,30 @@ function determineDeviceStatusWithReasons(
     ? reasons.join('; ')
     : 'Status could not be determined from available data'
 
-  return { status, statusReason, statusReasons: reasons }
+  return { status, statusReason, statusReasons: reasons, activityStatus }
 }
 
 /**
- * Determine if a device should be replaced
+ * Determine if a device should be replaced (Batten 3-year policy)
  */
 function shouldReplace(ageInYears: number, osVersion: string, model: string): boolean {
-  // Replace if older than 5 years
-  if (ageInYears >= 5) return true
+  // Replace if older than 3 years (Batten policy)
+  if (ageInYears >= 3) return true
 
   // Replace if running very old OS that can't be updated
   if (osVersion.includes('10.')) return true
-
-  // Replace old Intel Mac models
-  if (model.includes('2017') || model.includes('2018')) return true
-  if (model.includes('Intel') && !model.includes('M1') && !model.includes('M2') && !model.includes('M3')) {
-    return true
-  }
 
   return false
 }
 
 /**
- * Get reason for replacement recommendation
+ * Get reason for replacement recommendation (Batten 3-year policy)
  */
 function getReplacementReason(ageInYears: number, osVersion: string, model: string): string {
   const reasons: string[] = []
 
-  if (ageInYears >= 6) {
-    reasons.push('Device age exceeds 6 years')
-  } else if (ageInYears >= 5) {
-    reasons.push('Device age exceeds 5 years')
+  if (ageInYears >= 3) {
+    reasons.push(`Device age is ${ageInYears.toFixed(1)} years (exceeds Batten 3-year replacement policy)`)
   }
 
   if (osVersion.includes('10.')) {
@@ -288,15 +295,11 @@ function getReplacementReason(ageInYears: number, osVersion: string, model: stri
     reasons.push('Running outdated macOS 11')
   }
 
-  if (model.includes('2017') || model.includes('2018')) {
-    reasons.push('Hardware from 2017-2018')
+  if (model.includes('Intel') && !model.includes('M1') && !model.includes('M2') && !model.includes('M3') && !model.includes('M4')) {
+    reasons.push('Intel-based Mac (consider Apple Silicon for replacement)')
   }
 
-  if (model.includes('Intel') && !model.includes('M1')) {
-    reasons.push('Intel-based Mac (Apple Silicon recommended)')
-  }
-
-  return reasons.length > 0 ? reasons.join(', ') : 'General aging concerns'
+  return reasons.length > 0 ? reasons.join('; ') : 'General aging concerns'
 }
 
 /**
