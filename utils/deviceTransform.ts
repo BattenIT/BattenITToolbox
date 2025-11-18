@@ -4,7 +4,7 @@
  */
 
 import { Device, DeviceStatus, OSType } from '@/types/device'
-import { IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData, parseDate, yearsBetween, daysBetween } from './csvParser'
+import { IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData, EntraDeviceData, parseDate, yearsBetween, daysBetween } from './csvParser'
 import { extractComputingIdsFromDeviceName } from './dataLoader'
 
 /**
@@ -29,6 +29,18 @@ function isITProvisioner(owner: string, email?: string): boolean {
   if (IT_PROVISIONERS.has(owner)) return true
   if (email && IT_PROVISIONERS.has(email)) return true
   if (email && IT_PROVISIONERS.has(email.split('@')[0])) return true
+
+  // Check if owner name contains a provisioner's computing ID in parentheses
+  // e.g., "Whelchel, Jeffrey Wayne (jww8je)"
+  const idMatch = owner.match(/\(([a-zA-Z0-9]+)\)/)
+  if (idMatch && IT_PROVISIONERS.has(idMatch[1].toLowerCase())) return true
+  if (idMatch && IT_PROVISIONERS.has(idMatch[1])) return true
+
+  // Check for partial name matches
+  const ownerLower = owner.toLowerCase()
+  if (ownerLower.includes('whelchel') || ownerLower.includes('jww8je')) return true
+  if (ownerLower.includes('hartless') || ownerLower.includes('bh4hb')) return true
+
   return false
 }
 
@@ -177,7 +189,41 @@ export function transformJamfData(jamfData: JamfRawData[], usersMap?: Map<string
 export function transformIntuneData(intuneData: IntuneRawData[], usersMap?: Map<string, BattenUserData>): Device[] {
   const now = new Date()
 
-  return intuneData.map((raw, index) => {
+  // Deduplicate Intune data - keep entry with UPN over empty, or most recent if both have/don't have UPN
+  const deviceMap = new Map<string, IntuneRawData>()
+  intuneData.forEach(raw => {
+    const deviceName = raw.DeviceName?.trim().toUpperCase()
+    if (!deviceName) return
+
+    const existing = deviceMap.get(deviceName)
+    let shouldUse = !existing
+
+    if (existing) {
+      const existingHasUPN = !!existing.UPN?.trim()
+      const newHasUPN = !!raw.UPN?.trim()
+      const existingTimestamp = existing.PspdpuLastModifiedTimeUtc || ''
+      const newTimestamp = raw.PspdpuLastModifiedTimeUtc || ''
+
+      // Priority: entry with UPN > entry without UPN
+      if (newHasUPN && !existingHasUPN) {
+        shouldUse = true
+      } else if (existingHasUPN && !newHasUPN) {
+        shouldUse = false
+      } else {
+        // Both have UPN or both don't - use more recent
+        shouldUse = newTimestamp > existingTimestamp
+      }
+    }
+
+    if (shouldUse) {
+      deviceMap.set(deviceName, raw)
+    }
+  })
+
+  const deduplicatedData = Array.from(deviceMap.values())
+  console.log(`📱 Intune: Deduplicated ${intuneData.length} records to ${deduplicatedData.length} unique devices`)
+
+  return deduplicatedData.map((raw, index) => {
     // Parse dates
     const lastModified = parseDate(raw.PspdpuLastModifiedTimeUtc) || now
 
@@ -678,6 +724,134 @@ export function mergeQualysData(
 
   const matchedCount = mergedDevices.filter(d => d.qualysAgentId).length
   console.log(`✅ Matched ${matchedCount} of ${devices.length} devices to Qualys data`)
+
+  return mergedDevices
+}
+
+/**
+ * Merge Entra device data with existing devices for better user matching
+ * Entra data provides direct device-to-user mapping via User principal name
+ */
+export function mergeEntraData(
+  devices: Device[],
+  entraDeviceMap: Map<string, EntraDeviceData>,
+  usersMap?: Map<string, BattenUserData>
+): Device[] {
+  console.log(`📋 Merging Entra data for ${devices.length} devices`)
+
+  let matchedCount = 0
+  let ownerUpdatedCount = 0
+  let additionalOwnerCount = 0
+
+  const mergedDevices = devices.map(device => {
+    // Look up device in Entra map by name (uppercase for consistent matching)
+    const entraDevice = entraDeviceMap.get(device.name.toUpperCase())
+
+    if (!entraDevice) {
+      return device
+    }
+
+    matchedCount++
+
+    // Extract user info from Entra
+    let userPrincipalName = entraDevice['User principal name']?.trim() || ''
+    const entraDepartment = entraDevice['Department']?.trim() || ''
+    const entraComplianceState = entraDevice['Compliance state']?.trim() || ''
+
+    // If no user principal name in Entra, try to extract from device name
+    if (!userPrincipalName && usersMap) {
+      const computingIds = extractComputingIdsFromDeviceName(device.name)
+      for (const computingId of computingIds) {
+        // Skip if it looks like a provisioner
+        if (computingId === 'bh4hb' || computingId === 'jww8je') continue
+
+        const matchedUser = usersMap.get(computingId)
+        if (matchedUser) {
+          // Found a user from device name - use their email as the principal name
+          userPrincipalName = matchedUser.mail || `${computingId}@virginia.edu`
+          console.log(`📋 Device "${device.name}": No Entra user, but found ${matchedUser.name} from device name computing ID "${computingId}"`)
+          break
+        }
+      }
+    }
+
+    // If still no user principal name, nothing to add
+    if (!userPrincipalName) {
+      return device
+    }
+
+    // Extract computing ID from email (e.g., "jsm2ku@virginia.edu" -> "jsm2ku")
+    const entraComputingId = userPrincipalName.split('@')[0].toLowerCase()
+
+    // Check if the Entra user is an IT provisioner (shouldn't be primary owner)
+    const isProvisioner = isITProvisioner(userPrincipalName, entraComputingId)
+
+    // Try to look up full name from users directory
+    let entraUserName = userPrincipalName
+    if (usersMap && entraComputingId) {
+      const matchedUser = usersMap.get(entraComputingId)
+      if (matchedUser && matchedUser.name) {
+        entraUserName = matchedUser.name
+      }
+    }
+
+    // Determine how to update owner fields
+    let newOwner = device.owner
+    let newOwnerEmail = device.ownerEmail
+    let newAdditionalOwner = device.additionalOwner
+    let newDepartment = device.department || entraDepartment
+
+    // Check if current owner is a provisioner
+    const currentOwnerIsProvisioner = isITProvisioner(device.owner, device.ownerEmail)
+
+    if (isProvisioner) {
+      // Entra user is a provisioner - add as additional owner only if different
+      if (!device.additionalOwner && device.owner !== entraUserName) {
+        newAdditionalOwner = `${entraUserName} (provisioner)`
+        additionalOwnerCount++
+        console.log(`📋 Device "${device.name}": Added provisioner ${entraUserName} as additional owner`)
+      }
+    } else if (currentOwnerIsProvisioner || device.owner === 'Unassigned' || device.owner === 'Unknown' || !device.owner) {
+      // Current owner is a provisioner or unassigned - use Entra user as primary owner
+      newOwner = entraUserName
+      newOwnerEmail = userPrincipalName
+      ownerUpdatedCount++
+
+      // Move old owner to additional owner if they were a provisioner
+      if (currentOwnerIsProvisioner && device.owner !== 'Unassigned' && device.owner !== 'Unknown') {
+        newAdditionalOwner = device.additionalOwner
+          ? `${device.additionalOwner}; ${device.owner} (provisioner)`
+          : `${device.owner} (provisioner)`
+      }
+
+      console.log(`📋 Device "${device.name}": Updated primary owner from "${device.owner}" to "${entraUserName}"`)
+    } else if (device.owner !== entraUserName && !device.additionalOwner) {
+      // Different user - add Entra user as additional owner
+      newAdditionalOwner = entraUserName
+      additionalOwnerCount++
+      console.log(`📋 Device "${device.name}": Added ${entraUserName} as additional owner (primary: ${device.owner})`)
+    }
+
+    // Add compliance state note if non-compliant
+    let notes = device.notes || ''
+    if (entraComplianceState && entraComplianceState !== 'Compliant' && entraComplianceState !== 'Unknown') {
+      const complianceNote = `Entra compliance: ${entraComplianceState}`
+      notes = notes ? `${notes}; ${complianceNote}` : complianceNote
+    }
+
+    return {
+      ...device,
+      owner: newOwner,
+      ownerEmail: newOwnerEmail,
+      additionalOwner: newAdditionalOwner,
+      department: newDepartment,
+      notes: notes || undefined,
+    }
+  })
+
+  console.log(`✅ Entra merge complete: ${matchedCount} devices matched`)
+  console.log(`   - ${ownerUpdatedCount} primary owners updated`)
+  console.log(`   - ${additionalOwnerCount} additional owners added`)
 
   return mergedDevices
 }

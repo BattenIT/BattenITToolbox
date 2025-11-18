@@ -4,13 +4,16 @@
  */
 
 import { Device, DeviceSummary } from '@/types/device'
-import { parseCSV, IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData } from './csvParser'
-import { transformJamfData, transformIntuneData, mergeDevices, mergeQualysData } from './deviceTransform'
+import { parseCSV, IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData, EntraDeviceData } from './csvParser'
+import { transformJamfData, transformIntuneData, mergeDevices, mergeQualysData, mergeEntraData } from './deviceTransform'
 import IntuneCSV from '../InTune.csv'
 import JamfCSV from '../Jamf.csv'
 
 // User lookup map for matching computing IDs
 let battenUsersMap: Map<string, BattenUserData> | null = null
+
+// Entra device-to-user lookup map
+let entraDeviceMap: Map<string, EntraDeviceData> | null = null
 
 // LocalStorage keys for uploaded CSV data
 const STORAGE_KEYS = {
@@ -109,6 +112,75 @@ async function loadBattenUsers(): Promise<Map<string, BattenUserData>> {
 }
 
 /**
+ * Load Entra device data from CSV files (BA- and FBS- prefixed devices)
+ * Creates a map of device name -> user info for matching
+ * Handles duplicate entries by keeping the most recent login with a valid user
+ */
+async function loadEntraDevices(): Promise<Map<string, EntraDeviceData>> {
+  if (entraDeviceMap) {
+    return entraDeviceMap
+  }
+
+  entraDeviceMap = new Map()
+
+  // List of Entra CSV files to try loading
+  const entraFiles = [
+    '/Batten Entra Devices with BA- Display Name.csv',
+    '/Batten Entra Devices with FBS- Display Name.csv'
+  ]
+
+  for (const fileName of entraFiles) {
+    try {
+      const response = await fetch(fileName)
+      if (response.ok) {
+        const text = await response.text()
+        const devices = parseCSV<EntraDeviceData>(text)
+
+        devices.forEach(device => {
+          const deviceName = device['Display name']?.trim()
+          if (!deviceName) return
+
+          const key = deviceName.toUpperCase()
+          const existingDevice = entraDeviceMap!.get(key)
+
+          // Determine if we should use this entry over existing one
+          let shouldUse = !existingDevice
+
+          if (existingDevice) {
+            const existingHasUser = !!existingDevice['User principal name']?.trim()
+            const newHasUser = !!device['User principal name']?.trim()
+            const existingTimestamp = existingDevice['Approximate last logon timestamp'] || ''
+            const newTimestamp = device['Approximate last logon timestamp'] || ''
+
+            // Priority: entry with user > entry without user
+            // If both have users or both don't, prefer more recent
+            if (newHasUser && !existingHasUser) {
+              shouldUse = true
+            } else if (existingHasUser && !newHasUser) {
+              shouldUse = false
+            } else {
+              // Both have users or both don't - use more recent timestamp
+              shouldUse = newTimestamp > existingTimestamp
+            }
+          }
+
+          if (shouldUse) {
+            entraDeviceMap!.set(key, device)
+          }
+        })
+
+        console.log(`📋 Loaded ${devices.length} Entra records from ${fileName}`)
+      }
+    } catch (error) {
+      console.warn(`Could not load Entra file ${fileName}:`, error)
+    }
+  }
+
+  console.log(`📋 Total unique Entra device mappings: ${entraDeviceMap.size}`)
+  return entraDeviceMap
+}
+
+/**
  * Extract computing IDs from device name
  * Device names often contain computing IDs like "FBS-bh4hb-2023" or "BA-abc3xy" or "FBS-CQK8GH-3460"
  */
@@ -155,6 +227,9 @@ export async function loadDeviceData(): Promise<Device[]> {
     // Load Batten users first
     const usersMap = await loadBattenUsers()
 
+    // Load Entra device-to-user mappings
+    const entraMap = await loadEntraDevices()
+
     // Get CSV data from localStorage or public directory
     const intuneText = await getCSVData('intune')
     const jamfText = await getCSVData('jamf')
@@ -177,6 +252,12 @@ export async function loadDeviceData(): Promise<Device[]> {
 
     // Merge devices
     let allDevices = mergeDevices(jamfDevices, intuneDevices)
+
+    // Merge Entra data for better user matching
+    if (entraMap.size > 0) {
+      console.log('📋 Merging Entra device-to-user data...')
+      allDevices = mergeEntraData(allDevices, entraMap, usersMap)
+    }
 
     // Load and merge Qualys data if available
     const qualysAssetsText = await getCSVData('qualys')

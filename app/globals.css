@@ -5,6 +5,11 @@
 @layer base {
   body {
     @apply text-foreground;
+    background-image: linear-gradient(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.85)), url('/garrett-hall-sunset.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
   }
   h1, h2, h3, h4, h5, h6 {
     @apply font-serif;

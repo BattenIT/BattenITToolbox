@@ -5,7 +5,7 @@ import Header from '@/components/Header'
 import Footer from '@/components/Footer'
 import MetricCard from '@/components/MetricCard'
 import DeviceTable from '@/components/DeviceTable'
-import { AlertCircle, AlertTriangle, CheckCircle, Laptop, Shield, Clock, Database, Search, User, DollarSign, TrendingUp, Upload, BarChart3 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, Laptop, Shield, Clock, Database, Search, User, DollarSign, TrendingUp, Upload, BarChart3, Settings } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Device } from '@/types/device'
 import { MetricCardData } from '@/types/metric'
@@ -13,11 +13,13 @@ import { loadDeviceData, calculateDeviceSummary, saveCSVToStorage } from '@/util
 import CSVUploader from '@/components/CSVUploader'
 
 type FilterView = 'attention' | 'all' | 'critical' | 'warning' | 'good' | 'inactive' | 'active' | 'jamf' | 'intune' | 'replacement'
+type TabView = 'overview' | 'devices' | 'security' | 'tools'
 
 export default function Home() {
   const router = useRouter()
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<TabView>('overview')
   const [filterView, setFilterView] = useState<FilterView>('attention')
   const [searchTerm, setSearchTerm] = useState('')
   const [userLookup, setUserLookup] = useState('')
@@ -54,17 +56,14 @@ export default function Home() {
     loadData()
   }
 
-  // Calculate summary metrics
   const summary = calculateDeviceSummary(devices)
 
-  // Filter devices based on selected view
-  const getFilteredDevices = (): Device[] => {
-    let filtered: Device[] = []
+  // Filter devices based on current filter view and search
+  const getFilteredDevices = () => {
+    let filtered = devices
 
+    // Apply status/source filters
     switch (filterView) {
-      case 'all':
-        filtered = devices
-        break
       case 'critical':
         filtered = devices.filter(d => d.status === 'critical')
         break
@@ -90,31 +89,30 @@ export default function Home() {
         filtered = devices.filter(d => d.replacementRecommended)
         break
       case 'attention':
+        filtered = devices.filter(d => d.status === 'critical' || d.status === 'warning' || d.replacementRecommended)
+        break
+      case 'all':
       default:
-        filtered = devices.filter(d => d.status === 'critical' || d.status === 'warning' || d.status === 'inactive')
+        // No filter
+        break
     }
 
     // Apply search filter
-    if (searchTerm.trim()) {
-      const search = searchTerm.toLowerCase()
-      filtered = filtered.filter(d =>
-        d.name.toLowerCase().includes(search) ||
-        d.owner.toLowerCase().includes(search) ||
-        d.ownerEmail?.toLowerCase().includes(search) ||
-        d.additionalOwner?.toLowerCase().includes(search) ||
-        d.serialNumber?.toLowerCase().includes(search) ||
-        d.department?.toLowerCase().includes(search) ||
-        d.model.toLowerCase().includes(search)
+    if (searchTerm) {
+      filtered = filtered.filter(device =>
+        device.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        device.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (device.additionalOwner && device.additionalOwner.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        device.model.toLowerCase().includes(searchTerm.toLowerCase())
       )
     }
 
     // Apply user lookup filter
-    if (userLookup.trim()) {
-      const lookup = userLookup.toLowerCase()
-      filtered = filtered.filter(d =>
-        d.owner.toLowerCase().includes(lookup) ||
-        d.ownerEmail?.toLowerCase().includes(lookup) ||
-        d.additionalOwner?.toLowerCase().includes(lookup)
+    if (userLookup) {
+      filtered = filtered.filter(device =>
+        device.owner.toLowerCase().includes(userLookup.toLowerCase()) ||
+        (device.ownerEmail && device.ownerEmail.toLowerCase().includes(userLookup.toLowerCase())) ||
+        (device.additionalOwner && device.additionalOwner.toLowerCase().includes(userLookup.toLowerCase()))
       )
     }
 
@@ -136,82 +134,83 @@ export default function Home() {
       case 'critical':
         return { title: 'Critical Devices', description: 'Devices requiring immediate replacement' }
       case 'warning':
-        return { title: 'Warning Devices', description: 'Devices approaching end-of-life' }
+        return { title: 'Warning Devices', description: 'Devices approaching end of life' }
       case 'good':
         return { title: 'Good Devices', description: 'Devices in good condition' }
       case 'inactive':
-        return { title: 'Inactive Devices', description: 'Not checked in for 30+ days' }
+        return { title: 'Inactive Devices', description: 'Devices not seen recently' }
       case 'active':
-        return { title: 'Active Devices', description: 'Checked in within 30 days' }
+        return { title: 'Active Devices', description: 'Devices with recent activity' }
       case 'jamf':
-        return { title: 'Jamf Devices', description: 'macOS devices from Jamf' }
+        return { title: 'Jamf Devices', description: 'Devices managed by Jamf Pro' }
       case 'intune':
-        return { title: 'Intune Devices', description: 'Windows devices from Intune' }
+        return { title: 'Intune Devices', description: 'Devices managed by Microsoft Intune' }
       case 'replacement':
         return { title: 'Replacement Needed', description: 'Devices flagged for replacement' }
       case 'attention':
       default:
-        return { title: 'Devices Needing Attention', description: 'Critical, Warning, and Inactive devices' }
+        return { title: 'Devices Needing Attention', description: 'Critical, warning, or replacement recommended' }
     }
   }
 
   const filterInfo = getFilterInfo()
 
-  // Metric cards data
+  // Primary metric cards
   const metricCards: MetricCardData[] = [
     {
-      label: 'Critical',
+      label: 'Critical Devices',
       value: summary.criticalCount,
-      subtext: 'Devices need replacement',
+      subtext: `${((summary.criticalCount / summary.totalDevices) * 100).toFixed(1)}% of fleet`,
       icon: AlertCircle,
       bgColor: 'bg-white',
       borderColor: 'border-red-200',
       iconGradient: 'from-red-500 to-red-600',
     },
     {
-      label: 'Warning',
+      label: 'Warning Devices',
       value: summary.warningCount,
-      subtext: 'Devices approaching EOL',
+      subtext: 'Approaching end of life',
       icon: AlertTriangle,
       bgColor: 'bg-white',
       borderColor: 'border-yellow-200',
-      iconGradient: 'from-uva-orange to-uva-orange-light',
+      iconGradient: 'from-yellow-500 to-yellow-600',
     },
     {
-      label: 'Good',
+      label: 'Good Devices',
       value: summary.goodCount,
-      subtext: 'Devices up to date',
+      subtext: 'In good condition',
       icon: CheckCircle,
       bgColor: 'bg-white',
       borderColor: 'border-green-200',
       iconGradient: 'from-green-500 to-green-600',
     },
     {
-      label: 'Inactive',
-      value: summary.inactiveCount,
-      subtext: 'Not checked in 30+ days',
-      icon: Clock,
+      label: 'Total Devices',
+      value: summary.totalDevices,
+      subtext: `Avg age: ${summary.averageAge.toFixed(1)} years`,
+      icon: Laptop,
       bgColor: 'bg-white',
       borderColor: 'border-gray-200',
       iconGradient: 'from-gray-500 to-gray-600',
     },
   ]
 
+  // Secondary metrics
   const additionalMetrics: MetricCardData[] = [
     {
-      label: 'Total Devices',
-      value: summary.totalDevices,
-      subtext: 'Across all platforms',
-      icon: Laptop,
+      label: 'Active Devices',
+      value: summary.activeDevices,
+      subtext: 'Seen in last 30 days',
+      icon: Clock,
       bgColor: 'bg-white',
-      borderColor: 'border-gray-200',
-      iconGradient: 'from-uva-navy to-uva-navy/80',
+      borderColor: 'border-blue-200',
+      iconGradient: 'from-blue-500 to-blue-600',
     },
     {
-      label: 'Need Replacement',
+      label: 'Replacement Needed',
       value: summary.devicesNeedingReplacement,
-      subtext: 'Hardware aging or obsolete',
-      icon: AlertCircle,
+      subtext: `$${(summary.devicesNeedingReplacement * 1500).toLocaleString()} est. cost`,
+      icon: TrendingUp,
       bgColor: 'bg-white',
       borderColor: 'border-red-200',
       iconGradient: 'from-red-500 to-red-600',
@@ -219,15 +218,15 @@ export default function Home() {
     {
       label: 'Out of Date',
       value: summary.outOfDateDevices,
-      subtext: 'Not updated in 30+ days',
-      icon: Clock,
+      subtext: '60+ days since update',
+      icon: AlertTriangle,
       bgColor: 'bg-white',
-      borderColor: 'border-yellow-200',
-      iconGradient: 'from-yellow-500 to-yellow-600',
+      borderColor: 'border-orange-200',
+      iconGradient: 'from-orange-500 to-orange-600',
     },
     {
       label: 'Data Sources',
-      value: 2,
+      value: '2',
       subtext: 'Jamf & Intune',
       icon: Database,
       bgColor: 'bg-white',
@@ -284,16 +283,16 @@ export default function Home() {
         {/* Main Content */}
         <section className="max-w-[1920px] mx-auto px-8 py-12 pt-8">
           {loading ? (
-            <div className="flex items-center justify-center py-20">
+            <div className="flex items-center justify-center h-96">
               <div className="text-center">
-                <div className="inline-block w-16 h-16 border-4 border-uva-orange border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="text-lg text-gray-600">Loading device data...</p>
+                <div className="inline-block animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-uva-orange mb-4"></div>
+                <p className="text-xl text-uva-navy font-semibold">Loading device data...</p>
               </div>
             </div>
           ) : devices.length === 0 ? (
-            <div className="text-center py-20">
+            <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-12 text-center">
               <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h2 className="text-2xl font-serif font-bold text-gray-700 mb-2">
+              <h2 className="text-2xl font-serif font-bold text-uva-navy mb-2">
                 No Data Available
               </h2>
               <p className="text-gray-600">
@@ -302,159 +301,380 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {/* Search and Tools */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
-                  Search & Tools
-                </h2>
-                <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              {/* Tab Navigation */}
+              <div className="mb-8">
+                <div className="border-b-2 border-gray-200">
+                  <div className="flex gap-1 overflow-x-auto">
+                    <button
+                      onClick={() => setActiveTab('overview')}
+                      className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
+                        activeTab === 'overview'
+                          ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
+                          : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
+                      }`}
+                    >
+                      Overview
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('devices')}
+                      className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
+                        activeTab === 'devices'
+                          ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
+                          : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
+                      }`}
+                    >
+                      All Devices
+                    </button>
+                    {securityMetrics.length > 0 && (
+                      <button
+                        onClick={() => setActiveTab('security')}
+                        className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
+                          activeTab === 'security'
+                            ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
+                            : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
+                        }`}
+                      >
+                        Security
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setActiveTab('tools')}
+                      className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
+                        activeTab === 'tools'
+                          ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
+                          : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
+                      }`}
+                    >
+                      Tools & Settings
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* OVERVIEW TAB */}
+              {activeTab === 'overview' && (
+                <div className="animate-fade-in">
+                  {/* Primary Metrics */}
+                  <div className="mb-12">
+                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
+                      Device Health Overview
+                    </h2>
+
+                    {/* Explanation Section */}
+                    <div className="bg-blue-50 border-l-4 border-blue-500 p-6 mb-6 rounded-r-lg">
+                      <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5" />
+                        How Device Health is Calculated
+                      </h3>
+                      <div className="text-sm text-blue-800 space-y-2">
+                        <p>
+                          <strong>Critical Devices:</strong> Devices that are 7+ years old OR have failed OS compliance checks.
+                          These devices require immediate replacement due to age, security vulnerabilities, or inability to run current software.
+                        </p>
+                        <p>
+                          <strong>Warning Devices:</strong> Devices that are 5-7 years old. These are approaching end-of-life and should
+                          be planned for replacement within the next fiscal year.
+                        </p>
+                        <p>
+                          <strong>Good Devices:</strong> Devices less than 5 years old that are functioning normally and meet security requirements.
+                        </p>
+                        <p>
+                          <strong>Age Calculation:</strong> Device age is calculated from the purchase date (if available) or enrollment date.
+                          Average fleet age helps identify when bulk replacements may be needed.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                      {metricCards.map((card, index) => (
+                        <MetricCard
+                          key={card.label}
+                          data={card}
+                          animationDelay={`animation-delay-${index * 200}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Secondary Metrics */}
+                  <div className="mb-12">
+                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
+                      Additional Insights
+                    </h2>
+
+                    {/* Explanation Section */}
+                    <div className="bg-green-50 border-l-4 border-green-500 p-6 mb-6 rounded-r-lg">
+                      <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
+                        <Clock className="w-5 h-5" />
+                        Understanding Activity & Update Metrics
+                      </h3>
+                      <div className="text-sm text-green-800 space-y-2">
+                        <p>
+                          <strong>Active Devices:</strong> Devices that have checked in with Jamf or Intune within the last 30 days.
+                          Inactive devices may be lost, stolen, in storage, or retired without being properly deprovisioned.
+                        </p>
+                        <p>
+                          <strong>Replacement Needed:</strong> Count of devices flagged for replacement based on age, compliance failures,
+                          or hardware issues. The estimated cost assumes $1,500 per device replacement.
+                        </p>
+                        <p>
+                          <strong>Out of Date:</strong> Devices that haven't received OS updates in 60+ days. These devices may have
+                          security vulnerabilities and should be investigated for update failures or user-deferred updates.
+                        </p>
+                        <p>
+                          <strong>Data Sources:</strong> This dashboard aggregates data from Jamf Pro (macOS devices), Microsoft Intune
+                          (Windows devices), Qualys (vulnerabilities), and UVA user directory.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                      {additionalMetrics.map((card, index) => (
+                        <MetricCard
+                          key={card.label}
+                          data={card}
+                          animationDelay={`animation-delay-${index * 200}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Security Metrics (Qualys) */}
+                  {securityMetrics.length > 0 && (
+                    <div className="mb-12">
+                      <div className="flex items-center gap-3 mb-6">
+                        <Shield className="w-7 h-7 text-red-600" />
+                        <h2 className="text-2xl font-serif font-bold text-uva-navy">
+                          Security & Vulnerability Insights
+                        </h2>
+                      </div>
+
+                      {/* Explanation Section */}
+                      <div className="bg-red-50 border-l-4 border-red-500 p-6 mb-6 rounded-r-lg">
+                        <h3 className="font-semibold text-red-900 mb-3 flex items-center gap-2">
+                          <Shield className="w-5 h-5" />
+                          Understanding Qualys Security Metrics
+                        </h3>
+                        <div className="text-sm text-red-800 space-y-2">
+                          <p>
+                            <strong>Qualys Coverage:</strong> Number of devices with active Qualys agents performing security scans.
+                            Devices are matched to Qualys data by hostname, NetBIOS name, or user computing ID. Not all devices may have
+                            Qualys agents installed, especially personal or newly provisioned devices.
+                          </p>
+                          <p>
+                            <strong>Vulnerabilities:</strong> Total count of all security vulnerabilities detected across the fleet,
+                            including software outdated versions, missing patches, and configuration issues identified by Qualys scans.
+                          </p>
+                          <p>
+                            <strong>Critical Vulnerabilities:</strong> High-priority vulnerabilities (severity 4-5) that pose immediate
+                            security risks and should be remediated urgently. These often include remotely exploitable flaws and zero-day vulnerabilities.
+                          </p>
+                          <p>
+                            <strong>TruRisk Score:</strong> Qualys' proprietary risk scoring (0-1000) that combines vulnerability severity,
+                            asset criticality, and threat intelligence. Higher scores indicate greater risk exposure. The average helps
+                            prioritize remediation efforts across the fleet.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {securityMetrics.map((card, index) => (
+                          <MetricCard
+                            key={card.label}
+                            data={card}
+                            animationDelay={`animation-delay-${index * 200}`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick Actions */}
+                  <div className="mb-12">
+                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
+                      Quick Actions
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <button
+                        onClick={() => setActiveTab('devices')}
+                        className="bg-white rounded-xl shadow-2xl border-4 border-blue-200 p-8 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:-translate-y-2 transition-all text-left"
+                      >
+                        <Laptop className="w-12 h-12 text-blue-600 mb-4" />
+                        <h3 className="text-xl font-bold text-uva-navy mb-2">View All Devices</h3>
+                        <p className="text-gray-600">Browse and search all {devices.length} devices with filtering</p>
+                      </button>
+
+                      {securityMetrics.length > 0 && (
+                        <button
+                          onClick={() => setActiveTab('security')}
+                          className="bg-white rounded-xl shadow-2xl border-4 border-red-200 p-8 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:-translate-y-2 transition-all text-left"
+                        >
+                          <Shield className="w-12 h-12 text-red-600 mb-4" />
+                          <h3 className="text-xl font-bold text-uva-navy mb-2">Security Dashboard</h3>
+                          <p className="text-gray-600">View vulnerability data and security metrics</p>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => router.push('/analytics')}
+                        className="bg-white rounded-xl shadow-2xl border-4 border-green-200 p-8 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:-translate-y-2 transition-all text-left"
+                      >
+                        <BarChart3 className="w-12 h-12 text-green-600 mb-4" />
+                        <h3 className="text-xl font-bold text-uva-navy mb-2">Analytics & Charts</h3>
+                        <p className="text-gray-600">View detailed visualizations and reports</p>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* DEVICES TAB */}
+              {activeTab === 'devices' && (
+                <div className="animate-fade-in">
                   {/* Search Bar */}
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Search className="w-5 h-5 text-uva-orange" />
-                      <h3 className="text-lg font-semibold text-uva-navy">Search Devices</h3>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Search by name, owner, serial, model..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-uva-orange focus:outline-none transition-colors"
-                    />
-                    {searchTerm && (
-                      <div className="mt-3 text-sm text-gray-600">
-                        Found {filteredDevices.length} device{filteredDevices.length !== 1 ? 's' : ''}
-                        <button
-                          onClick={() => setSearchTerm('')}
-                          className="ml-2 text-uva-orange hover:underline"
-                        >
-                          Clear
-                        </button>
+                  <div className="mb-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search by device name, owner, or model..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-lg text-sm
+                                   focus:outline-none focus:border-uva-orange transition-colors"
+                        />
                       </div>
-                    )}
-                  </div>
-
-                  {/* User Lookup Tool */}
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <User className="w-5 h-5 text-uva-orange" />
-                      <h3 className="text-lg font-semibold text-uva-navy">User Lookup</h3>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Enter name or computing ID..."
-                      value={userLookup}
-                      onChange={(e) => setUserLookup(e.target.value)}
-                      className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg focus:border-uva-orange focus:outline-none transition-colors"
-                    />
-                    {userLookup && (
-                      <div className="mt-3 text-sm text-gray-600">
-                        {filteredDevices.length} device{filteredDevices.length !== 1 ? 's' : ''} for this user
-                        <button
-                          onClick={() => setUserLookup('')}
-                          className="ml-2 text-uva-orange hover:underline"
-                        >
-                          Clear
-                        </button>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Lookup by user/owner..."
+                          value={userLookup}
+                          onChange={(e) => setUserLookup(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-lg text-sm
+                                   focus:outline-none focus:border-uva-orange transition-colors"
+                        />
                       </div>
-                    )}
-                  </div>
-
-                  {/* Analytics Tool */}
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <BarChart3 className="w-5 h-5 text-uva-orange" />
-                      <h3 className="text-lg font-semibold text-uva-navy">Analytics</h3>
                     </div>
-                    <button
-                      onClick={() => router.push('/analytics')}
-                      className="w-full px-4 py-2 bg-uva-navy text-white rounded-lg hover:bg-uva-blue-light transition-colors font-semibold"
-                    >
-                      View Charts & Insights
-                    </button>
-                    <p className="mt-3 text-sm text-gray-600">
-                      Detailed visualizations
-                    </p>
                   </div>
 
-                  {/* Budget Tool Toggle */}
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <DollarSign className="w-5 h-5 text-uva-orange" />
-                      <h3 className="text-lg font-semibold text-uva-navy">Budget Planning</h3>
+                  {/* Filter Buttons */}
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold text-uva-navy mb-4">Filter Devices</h3>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={() => setFilterView('attention')}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                          filterView === 'attention'
+                            ? 'bg-uva-orange text-white shadow-lg'
+                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-uva-orange'
+                        }`}
+                      >
+                        Needs Attention ({summary.criticalCount + summary.warningCount})
+                      </button>
+                      <button
+                        onClick={() => setFilterView('all')}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                          filterView === 'all'
+                            ? 'bg-gray-600 text-white shadow-lg'
+                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-600'
+                        }`}
+                      >
+                        All ({summary.totalDevices})
+                      </button>
+                      <button
+                        onClick={() => setFilterView('critical')}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                          filterView === 'critical'
+                            ? 'bg-red-600 text-white shadow-lg'
+                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-red-600'
+                        }`}
+                      >
+                        Critical ({summary.criticalCount})
+                      </button>
+                      <button
+                        onClick={() => setFilterView('warning')}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                          filterView === 'warning'
+                            ? 'bg-yellow-600 text-white shadow-lg'
+                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-yellow-600'
+                        }`}
+                      >
+                        Warning ({summary.warningCount})
+                      </button>
+                      <button
+                        onClick={() => setFilterView('good')}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                          filterView === 'good'
+                            ? 'bg-green-600 text-white shadow-lg'
+                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-green-600'
+                        }`}
+                      >
+                        Good ({summary.goodCount})
+                      </button>
+                      <button
+                        onClick={() => setFilterView('replacement')}
+                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                          filterView === 'replacement'
+                            ? 'bg-red-600 text-white shadow-lg'
+                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-red-600'
+                        }`}
+                      >
+                        Replacement ({summary.devicesNeedingReplacement})
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setShowBudgetTool(!showBudgetTool)}
-                      className="w-full px-4 py-2 bg-uva-navy text-white rounded-lg hover:bg-uva-blue-light transition-colors font-semibold"
-                    >
-                      {showBudgetTool ? 'Hide' : 'Show'} Budget Calculator
-                    </button>
-                    <p className="mt-3 text-sm text-gray-600">
-                      Estimate replacement costs
-                    </p>
+                    <p className="text-sm text-gray-600 italic mt-2">{filterInfo.description}</p>
                   </div>
 
-                  {/* CSV Upload Tool */}
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Upload className="w-5 h-5 text-uva-orange" />
-                      <h3 className="text-lg font-semibold text-uva-navy">Upload CSVs</h3>
+                  {/* Device Table */}
+                  <div className="mb-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-600">
+                          Showing {displayedDevices.length} of {filteredDevices.length} devices
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="devicesPerPage" className="text-sm text-gray-600">
+                          Show:
+                        </label>
+                        <select
+                          id="devicesPerPage"
+                          value={devicesPerPage}
+                          onChange={(e) => setDevicesPerPage(Number(e.target.value))}
+                          className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm font-semibold
+                                   focus:border-uva-orange focus:outline-none transition-colors bg-white"
+                        >
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                          <option value={-1}>All</option>
+                        </select>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => setShowCSVUploader(true)}
-                      className="w-full px-4 py-2 bg-uva-navy text-white rounded-lg hover:bg-uva-blue-light transition-colors font-semibold"
-                    >
-                      Upload Data Files
-                    </button>
-                    <p className="mt-3 text-sm text-gray-600">
-                      Update Jamf, Intune, or Users
-                    </p>
-                  </div>
-                </div>
-              </div>
 
-              {/* Primary Metrics */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
-                  Device Health Overview
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {metricCards.map((card, index) => (
-                    <MetricCard
-                      key={card.label}
-                      data={card}
-                      animationDelay={`animation-delay-${index * 200}`}
+                    <DeviceTable
+                      devices={displayedDevices}
+                      title={filterInfo.title}
+                      showExport={true}
                     />
-                  ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Secondary Metrics */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
-                  Additional Insights
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {additionalMetrics.map((card, index) => (
-                    <MetricCard
-                      key={card.label}
-                      data={card}
-                      animationDelay={`animation-delay-${index * 200}`}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Security Metrics (Qualys) */}
-              {securityMetrics.length > 0 && (
-                <div className="mb-12">
-                  <div className="flex items-center gap-3 mb-6">
-                    <Shield className="w-7 h-7 text-red-600" />
-                    <h2 className="text-2xl font-serif font-bold text-uva-navy">
-                      Security & Vulnerability Insights
+              {/* SECURITY TAB */}
+              {activeTab === 'security' && securityMetrics.length > 0 && (
+                <div className="animate-fade-in">
+                  <div className="flex items-center gap-3 mb-8">
+                    <Shield className="w-8 h-8 text-red-600" />
+                    <h2 className="text-3xl font-serif font-bold text-uva-navy">
+                      Security & Vulnerability Analysis
                     </h2>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+
+                  {/* Security Metrics */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                     {securityMetrics.map((card, index) => (
                       <MetricCard
                         key={card.label}
@@ -463,523 +683,147 @@ export default function Home() {
                       />
                     ))}
                   </div>
-                </div>
-              )}
 
-              {/* Budget Planning Tool */}
-              {showBudgetTool && (
-                <div className="mb-12 animate-fade-in">
-                  <div className="bg-gradient-to-br from-green-50 to-blue-50 rounded-xl shadow-2xl border-4 border-green-200 p-8">
-                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6 flex items-center gap-2">
-                      <DollarSign className="w-6 h-6 text-green-600" />
-                      Replacement Budget Calculator
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                      {/* Critical Devices */}
-                      <div className="bg-white rounded-lg p-6 shadow-2xl border-2 border-gray-100">
-                        <h3 className="text-sm font-semibold text-gray-600 mb-2">Critical Replacements</h3>
-                        <p className="text-3xl font-serif font-bold text-red-600 mb-1">
-                          {summary.criticalCount}
-                        </p>
-                        <p className="text-sm text-gray-500">devices @ $1,500 avg</p>
-                        <p className="text-2xl font-semibold text-uva-navy mt-3">
-                          ${(summary.criticalCount * 1500).toLocaleString()}
-                        </p>
-                      </div>
-
-                      {/* Warning Devices */}
-                      <div className="bg-white rounded-lg p-6 shadow-2xl border-2 border-gray-100">
-                        <h3 className="text-sm font-semibold text-gray-600 mb-2">Warning (Next FY)</h3>
-                        <p className="text-3xl font-serif font-bold text-yellow-600 mb-1">
-                          {summary.warningCount}
-                        </p>
-                        <p className="text-sm text-gray-500">devices @ $1,500 avg</p>
-                        <p className="text-2xl font-semibold text-uva-navy mt-3">
-                          ${(summary.warningCount * 1500).toLocaleString()}
-                        </p>
-                      </div>
-
-                      {/* Total Flagged */}
-                      <div className="bg-white rounded-lg p-6 shadow-2xl border-2 border-gray-100">
-                        <h3 className="text-sm font-semibold text-gray-600 mb-2">Total Flagged</h3>
-                        <p className="text-3xl font-serif font-bold text-uva-orange mb-1">
-                          {summary.devicesNeedingReplacement}
-                        </p>
-                        <p className="text-sm text-gray-500">devices @ $1,500 avg</p>
-                        <p className="text-2xl font-semibold text-uva-navy mt-3">
-                          ${(summary.devicesNeedingReplacement * 1500).toLocaleString()}
-                        </p>
-                      </div>
-
-                      {/* 2-Year Projection */}
-                      <div className="bg-white rounded-lg p-6 shadow-2xl border-4 border-green-300">
-                        <h3 className="text-sm font-semibold text-gray-600 mb-2">2-Year Total Need</h3>
-                        <p className="text-3xl font-serif font-bold text-green-600 mb-1">
-                          {summary.criticalCount + summary.warningCount}
-                        </p>
-                        <p className="text-sm text-gray-500">devices over 2 years</p>
-                        <p className="text-2xl font-semibold text-uva-navy mt-3">
-                          ${((summary.criticalCount + summary.warningCount) * 1500).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-6 bg-white rounded-lg p-4 shadow-xl border-2 border-gray-100">
-                      <p className="text-sm text-gray-600">
-                        <strong>Note:</strong> Costs estimated at $1,500 per device (average of MacBook Air $1,200 and MacBook Pro $1,800).
-                        Critical devices need immediate replacement. Warning devices should be budgeted for next fiscal year.
-                      </p>
-                    </div>
+                  {/* Devices with Vulnerabilities */}
+                  <div className="mb-8">
+                    <h3 className="text-xl font-bold text-uva-navy mb-4">Vulnerable Devices</h3>
+                    <DeviceTable
+                      devices={devices.filter(d => d.qualysAgentId && d.vulnerabilityCount && d.vulnerabilityCount > 0).slice(0, 50)}
+                      title="Devices with Security Vulnerabilities"
+                      showExport={true}
+                    />
                   </div>
-                </div>
-              )}
 
-              {/* Device Classification Criteria */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
-                  How Devices Are Classified
-                </h2>
-                <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Status Categories */}
-                    <div>
-                      <h3 className="text-lg font-semibold text-uva-navy mb-4 flex items-center gap-2">
-                        <AlertCircle className="w-5 h-5 text-uva-orange" />
-                        Device Status Categories
-                      </h3>
-                      <div className="space-y-3 text-sm">
-                        <div className="flex gap-3">
-                          <div className="flex-shrink-0 w-20 h-6 bg-red-50 border border-red-200 rounded flex items-center justify-center">
-                            <span className="text-red-700 font-semibold text-xs">Critical</span>
-                          </div>
-                          <p className="text-gray-600">
-                            Device is <strong>3+ years old</strong> or running unsupported OS. Eligible for immediate replacement under Batten IT policy.
-                          </p>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="flex-shrink-0 w-20 h-6 bg-yellow-50 border border-yellow-200 rounded flex items-center justify-center">
-                            <span className="text-yellow-700 font-semibold text-xs">Warning</span>
-                          </div>
-                          <p className="text-gray-600">
-                            Device is <strong>2-3 years old</strong> or running aging OS. Should be budgeted for replacement in next fiscal year.
-                          </p>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="flex-shrink-0 w-20 h-6 bg-green-50 border border-green-200 rounded flex items-center justify-center">
-                            <span className="text-green-700 font-semibold text-xs">Good</span>
-                          </div>
-                          <p className="text-gray-600">
-                            Device is <strong>less than 2 years old</strong> and actively checking in. Within healthy lifecycle.
-                          </p>
-                        </div>
-                        <div className="flex gap-3">
-                          <div className="flex-shrink-0 w-20 h-6 bg-gray-50 border border-gray-300 rounded flex items-center justify-center">
-                            <span className="text-gray-700 font-semibold text-xs">Inactive</span>
-                          </div>
-                          <p className="text-gray-600">
-                            Device has <strong>not checked in for 30+ days</strong>. May be lost, stolen, decommissioned, or user has left organization.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Additional Criteria */}
-                    <div>
-                      <h3 className="text-lg font-semibold text-uva-navy mb-4 flex items-center gap-2">
-                        <Shield className="w-5 h-5 text-uva-orange" />
-                        Additional Criteria
-                      </h3>
-                      <div className="space-y-3 text-sm text-gray-600">
-                        <div>
-                          <p className="font-semibold text-uva-navy mb-1">Activity Status</p>
-                          <p>Active devices have checked in within <strong>30 days</strong>. Inactive devices exceed this threshold.</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-uva-navy mb-1">Replacement Policy</p>
-                          <p>Batten IT follows a <strong>3-year replacement cycle</strong>. Devices 3-5 years old are flagged for replacement. Devices older than 5 years are excluded as they're likely retired machines still in use.</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-uva-navy mb-1">Owner Matching</p>
-                          <p>Primary owners are automatically matched from device names (e.g., FBS-<strong>computingID</strong>-MBA-2023) against the Batten directory. IT provisioners are labeled accordingly.</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold text-uva-navy mb-1">Data Sources</p>
-                          <p><strong>Jamf</strong> manages macOS devices. <strong>Intune</strong> manages Windows devices. Data is refreshed from CSV exports.</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Filter Buttons */}
-              <div className="mb-8">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-4">
-                  Device List
-                </h2>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <button
-                    onClick={() => setFilterView('attention')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'attention'
-                        ? 'bg-uva-orange text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-uva-orange'
-                    }`}
-                  >
-                    Needs Attention ({summary.criticalCount + summary.warningCount + summary.inactiveCount})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('all')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'all'
-                        ? 'bg-uva-orange text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-uva-orange'
-                    }`}
-                  >
-                    All Devices ({summary.totalDevices})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('critical')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'critical'
-                        ? 'bg-red-600 text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-red-600'
-                    }`}
-                  >
-                    Critical ({summary.criticalCount})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('warning')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'warning'
-                        ? 'bg-yellow-600 text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-yellow-600'
-                    }`}
-                  >
-                    Warning ({summary.warningCount})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('good')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'good'
-                        ? 'bg-green-600 text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-green-600'
-                    }`}
-                  >
-                    Good ({summary.goodCount})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('inactive')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'inactive'
-                        ? 'bg-gray-600 text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-600'
-                    }`}
-                  >
-                    Inactive ({summary.inactiveCount})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('active')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'active'
-                        ? 'bg-blue-600 text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-600'
-                    }`}
-                  >
-                    Active ({summary.activeDevices})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('jamf')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'jamf'
-                        ? 'bg-uva-navy text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-uva-navy'
-                    }`}
-                  >
-                    Jamf ({devices.filter(d => d.source === 'jamf').length})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('intune')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'intune'
-                        ? 'bg-uva-navy text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-uva-navy'
-                    }`}
-                  >
-                    Intune ({devices.filter(d => d.source === 'intune').length})
-                  </button>
-                  <button
-                    onClick={() => setFilterView('replacement')}
-                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                      filterView === 'replacement'
-                        ? 'bg-red-600 text-white shadow-lg'
-                        : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-red-600'
-                    }`}
-                  >
-                    Replacement ({summary.devicesNeedingReplacement})
-                  </button>
-                </div>
-                <p className="text-sm text-gray-600 italic">{filterInfo.description}</p>
-              </div>
-
-              {/* Device Table - Show filtered devices */}
-              <div className="mb-12 animate-fade-in">
-                {/* Pagination Controls */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-gray-600">
-                      Showing {displayedDevices.length} of {filteredDevices.length} devices
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="devicesPerPage" className="text-sm text-gray-600">
-                      Show:
-                    </label>
-                    <select
-                      id="devicesPerPage"
-                      value={devicesPerPage}
-                      onChange={(e) => setDevicesPerPage(Number(e.target.value))}
-                      className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm font-semibold
-                               focus:border-uva-orange focus:outline-none transition-colors bg-white"
+                  {/* Link to Full Analytics */}
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6">
+                    <h3 className="font-semibold text-blue-900 mb-2">View Detailed Security Analytics</h3>
+                    <p className="text-sm text-blue-800 mb-4">
+                      For comprehensive charts, graphs, and vulnerability analysis, visit the Analytics page.
+                    </p>
+                    <button
+                      onClick={() => router.push('/analytics')}
+                      className="px-6 py-2 bg-uva-navy text-white rounded-lg font-semibold hover:bg-uva-blue-light transition-colors flex items-center gap-2"
                     >
-                      <option value={25}>25</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                      <option value={-1}>All</option>
-                    </select>
+                      <BarChart3 className="w-5 h-5" />
+                      View Full Analytics
+                    </button>
                   </div>
                 </div>
+              )}
 
-                <DeviceTable
-                  devices={displayedDevices}
-                  title={filterInfo.title}
-                  showExport={true}
-                />
-              </div>
-
-              {/* Statistics Section */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
-                  Device Statistics
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <h3 className="text-sm font-semibold text-gray-600 mb-2">Average Device Age</h3>
-                    <p className="text-4xl font-serif font-bold text-uva-navy">
-                      {summary.averageAge.toFixed(1)}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">years</p>
+              {/* TOOLS TAB */}
+              {activeTab === 'tools' && (
+                <div className="animate-fade-in">
+                  <div className="flex items-center gap-3 mb-8">
+                    <Settings className="w-8 h-8 text-gray-600" />
+                    <h2 className="text-3xl font-serif font-bold text-uva-navy">
+                      Tools & Settings
+                    </h2>
                   </div>
 
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <h3 className="text-sm font-semibold text-gray-600 mb-2">Active Devices</h3>
-                    <p className="text-4xl font-serif font-bold text-uva-navy">
-                      {summary.activeDevices}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">checked in recently</p>
-                  </div>
-
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <h3 className="text-sm font-semibold text-gray-600 mb-2">macOS Devices</h3>
-                    <p className="text-4xl font-serif font-bold text-uva-navy">
-                      {devices.filter(d => d.source === 'jamf').length}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">from Jamf</p>
-                  </div>
-
-                  <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
-                    <h3 className="text-sm font-semibold text-gray-600 mb-2">Windows Devices</h3>
-                    <p className="text-4xl font-serif font-bold text-uva-navy">
-                      {devices.filter(d => d.source === 'intune').length}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">from Intune</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Device Replacement Timeline */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6 flex items-center gap-2">
-                  <TrendingUp className="w-6 h-6 text-uva-orange" />
-                  Replacement Timeline & Forecast
-                </h2>
-                <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-8">
-                  <div className="space-y-6">
-                    {/* Current Year */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-red-600">FY 2025 (Immediate)</h3>
-                        <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
-                          {summary.criticalCount} devices
-                        </span>
+                  {/* Tool Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                    {/* CSV Uploader */}
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Upload className="w-6 h-6 text-uva-orange" />
+                        <h3 className="text-lg font-semibold text-uva-navy">Upload Data Files</h3>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-8 relative overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-red-500 to-red-600 h-8 rounded-full flex items-center justify-end pr-4 transition-all duration-1000"
-                          style={{ width: `${Math.min((summary.criticalCount / summary.totalDevices) * 100, 100)}%` }}
-                        >
-                          <span className="text-white font-semibold text-sm">
-                            {((summary.criticalCount / summary.totalDevices) * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-2">
-                        Critical devices (3+ years old) requiring immediate replacement
+                      <p className="text-sm text-gray-600 mb-4">
+                        Update device data from Jamf, Intune, Qualys, or user directory exports.
                       </p>
+                      <button
+                        onClick={() => setShowCSVUploader(true)}
+                        className="w-full px-4 py-2 bg-uva-navy text-white rounded-lg hover:bg-uva-blue-light transition-colors font-semibold"
+                      >
+                        Upload CSV Files
+                      </button>
                     </div>
 
-                    {/* Next Year */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-yellow-600">FY 2026 (Next Year)</h3>
-                        <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm font-semibold">
-                          {summary.warningCount} devices
-                        </span>
+                    {/* Budget Calculator */}
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <DollarSign className="w-6 h-6 text-green-600" />
+                        <h3 className="text-lg font-semibold text-uva-navy">Budget Calculator</h3>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-8 relative overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-yellow-500 to-yellow-600 h-8 rounded-full flex items-center justify-end pr-4 transition-all duration-1000"
-                          style={{ width: `${Math.min((summary.warningCount / summary.totalDevices) * 100, 100)}%` }}
-                        >
-                          <span className="text-white font-semibold text-sm">
-                            {((summary.warningCount / summary.totalDevices) * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-2">
-                        Warning devices (2-3 years old) approaching replacement cycle
+                      <p className="text-sm text-gray-600 mb-4">
+                        Calculate replacement costs and budget planning for device lifecycle management.
                       </p>
+                      <button
+                        onClick={() => setShowBudgetTool(!showBudgetTool)}
+                        className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+                      >
+                        {showBudgetTool ? 'Hide' : 'Show'} Calculator
+                      </button>
                     </div>
 
-                    {/* Future Years */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-lg font-semibold text-green-600">FY 2027+ (Future)</h3>
-                        <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
-                          {summary.goodCount} devices
-                        </span>
+                    {/* Analytics Link */}
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-gray-100 p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <BarChart3 className="w-6 h-6 text-blue-600" />
+                        <h3 className="text-lg font-semibold text-uva-navy">Analytics & Reports</h3>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-8 relative overflow-hidden">
-                        <div
-                          className="bg-gradient-to-r from-green-500 to-green-600 h-8 rounded-full flex items-center justify-end pr-4 transition-all duration-1000"
-                          style={{ width: `${Math.min((summary.goodCount / summary.totalDevices) * 100, 100)}%` }}
-                        >
-                          <span className="text-white font-semibold text-sm">
-                            {((summary.goodCount / summary.totalDevices) * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-2">
-                        Good devices (less than 2 years old) within healthy lifecycle
+                      <p className="text-sm text-gray-600 mb-4">
+                        View detailed charts, visualizations, and comprehensive analytics dashboards.
                       </p>
-                    </div>
-
-                    {/* Summary */}
-                    <div className="mt-6 pt-6 border-t-2 border-gray-200">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600 mb-1">Average Device Age</p>
-                          <p className="text-3xl font-serif font-bold text-uva-navy">{summary.averageAge.toFixed(1)} <span className="text-lg">years</span></p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600 mb-1">2-Year Replacement Need</p>
-                          <p className="text-3xl font-serif font-bold text-uva-orange">{summary.criticalCount + summary.warningCount} <span className="text-lg">devices</span></p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-sm text-gray-600 mb-1">Fleet Health Score</p>
-                          <p className="text-3xl font-serif font-bold text-green-600">
-                            {((summary.goodCount / summary.totalDevices) * 100).toFixed(0)}
-                            <span className="text-lg">%</span>
-                          </p>
-                        </div>
-                      </div>
+                      <button
+                        onClick={() => router.push('/analytics')}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
+                      >
+                        View Analytics
+                      </button>
                     </div>
                   </div>
+
+                  {/* Budget Planning Tool */}
+                  {showBudgetTool && (
+                    <div className="mb-8 animate-fade-in">
+                      <div className="bg-gradient-to-br from-green-50 to-blue-50 rounded-xl shadow-2xl border-4 border-green-200 p-8">
+                        <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6 flex items-center gap-2">
+                          <DollarSign className="w-6 h-6 text-green-600" />
+                          Replacement Budget Calculator
+                        </h2>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                          <div className="bg-white rounded-lg p-6 border-2 border-green-300">
+                            <p className="text-sm text-gray-600 mb-2">Critical (Immediate)</p>
+                            <p className="text-3xl font-bold text-red-600">{summary.criticalCount}</p>
+                            <p className="text-sm text-gray-700 mt-2">
+                              Est. Cost: <span className="font-semibold">${(summary.criticalCount * 1500).toLocaleString()}</span>
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-lg p-6 border-2 border-yellow-300">
+                            <p className="text-sm text-gray-600 mb-2">Warning (Next Year)</p>
+                            <p className="text-3xl font-bold text-yellow-600">{summary.warningCount}</p>
+                            <p className="text-sm text-gray-700 mt-2">
+                              Est. Cost: <span className="font-semibold">${(summary.warningCount * 1500).toLocaleString()}</span>
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-lg p-6 border-2 border-blue-300">
+                            <p className="text-sm text-gray-600 mb-2">Total Replacement Needed</p>
+                            <p className="text-3xl font-bold text-blue-600">{summary.devicesNeedingReplacement}</p>
+                            <p className="text-sm text-gray-700 mt-2">
+                              Est. Cost: <span className="font-semibold">${(summary.devicesNeedingReplacement * 1500).toLocaleString()}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-lg p-6 border-2 border-gray-200">
+                          <h3 className="font-semibold text-uva-navy mb-2">Budget Assumptions</h3>
+                          <ul className="text-sm text-gray-700 space-y-1">
+                            <li>• Average device replacement cost: $1,500</li>
+                            <li>• Critical devices need immediate replacement (current fiscal year)</li>
+                            <li>• Warning devices should be replaced in next fiscal year</li>
+                            <li>• Costs do not include setup, configuration, or disposal fees</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-
-              {/* Quick Actions */}
-              <div className="mb-12">
-                <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
-                  Quick Actions
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <button className="bg-white rounded-xl shadow-2xl border-4 border-gray-100
-                                   p-6 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:border-uva-orange
-                                   hover:-translate-y-2 transition-all duration-300
-                                   text-left group">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-gradient-to-br from-uva-navy to-uva-navy/80
-                                    rounded-xl group-hover:from-uva-orange
-                                    group-hover:to-uva-orange-light transition-all">
-                        <Laptop className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-lg font-serif font-bold text-uva-navy">
-                          All Devices
-                        </p>
-                        <p className="text-sm text-gray-600">View inventory</p>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button className="bg-white rounded-xl shadow-2xl border-4 border-gray-100
-                                   p-6 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:border-uva-orange
-                                   hover:-translate-y-2 transition-all duration-300
-                                   text-left group">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-gradient-to-br from-uva-navy to-uva-navy/80
-                                    rounded-xl group-hover:from-uva-orange
-                                    group-hover:to-uva-orange-light transition-all">
-                        <Shield className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-lg font-serif font-bold text-uva-navy">
-                          Security
-                        </p>
-                        <p className="text-sm text-gray-600">Compliance reports</p>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button className="bg-white rounded-xl shadow-2xl border-4 border-gray-100
-                                   p-6 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:border-uva-orange
-                                   hover:-translate-y-2 transition-all duration-300
-                                   text-left group">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-gradient-to-br from-uva-navy to-uva-navy/80
-                                    rounded-xl group-hover:from-uva-orange
-                                    group-hover:to-uva-orange-light transition-all">
-                        <AlertCircle className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-lg font-serif font-bold text-uva-navy">
-                          Alerts
-                        </p>
-                        <p className="text-sm text-gray-600">Active issues</p>
-                      </div>
-                    </div>
-                  </button>
-
-                  <button className="bg-white rounded-xl shadow-2xl border-4 border-gray-100
-                                   p-6 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:border-uva-orange
-                                   hover:-translate-y-2 transition-all duration-300
-                                   text-left group">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-gradient-to-br from-uva-navy to-uva-navy/80
-                                    rounded-xl group-hover:from-uva-orange
-                                    group-hover:to-uva-orange-light transition-all">
-                        <Database className="w-6 h-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-lg font-serif font-bold text-uva-navy">
-                          Reports
-                        </p>
-                        <p className="text-sm text-gray-600">Generate exports</p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
+              )}
             </>
           )}
         </section>

@@ -92,6 +92,22 @@ export interface QualysVulnData {
   'TruRisk Score': string
 }
 
+export interface EntraDeviceData {
+  'Display name': string
+  'Device OS type': string
+  'Device OS version': string
+  'User principal name': string
+  'Department': string
+  'Approximate last logon timestamp': string
+  'Device enrollment type': string
+  'Compliance state': string
+  'Enrolled datetime': string
+  'Last contacted date time': string
+  'Manufacturer': string
+  'Model': string
+  'Management agent': string
+}
+
 /**
  * Parse CSV string into array of objects
  */
