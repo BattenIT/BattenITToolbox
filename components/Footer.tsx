@@ -29,18 +29,18 @@ export default function Footer() {
             </h4>
             <div className="space-y-2">
               <a
-                href="mailto:batten-it@virginia.edu"
+                href="mailto:battensupport@virginia.edu"
                 className="flex items-center gap-2 text-sm text-white/80 hover:text-uva-orange transition-colors"
               >
                 <Mail className="w-4 h-4" />
-                batten-it@virginia.edu
+                battensupport@virginia.edu
               </a>
               <a
-                href="tel:+1-434-924-3900"
+                href="tel:+1-434-924-0812"
                 className="flex items-center gap-2 text-sm text-white/80 hover:text-uva-orange transition-colors"
               >
                 <Phone className="w-4 h-4" />
-                (434) 924-3900
+                (434) 924-0812
               </a>
             </div>
           </div>

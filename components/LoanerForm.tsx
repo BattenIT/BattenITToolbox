@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   LoanerLaptop,
   LoanerStatus,
   STATUS_LABELS,
 } from '@/types/loaner'
-import { X, Save, Mail } from 'lucide-react'
+import { X, Save, Mail, User } from 'lucide-react'
+import { loadUsersForAutocomplete, UserAutocompleteData } from '@/utils/dataLoader'
 
 interface LoanerFormProps {
   loaner?: LoanerLaptop | null
@@ -32,6 +33,19 @@ export default function LoanerForm({ loaner, onSave, onClose, mode = 'add' }: Lo
     condition: '',
     notes: '',
   })
+
+  // User autocomplete state
+  const [users, setUsers] = useState<UserAutocompleteData[]>([])
+  const [filteredUsers, setFilteredUsers] = useState<UserAutocompleteData[]>([])
+  const [showUserDropdown, setShowUserDropdown] = useState(false)
+  const [selectedUserIndex, setSelectedUserIndex] = useState(-1)
+  const userInputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Load users on mount
+  useEffect(() => {
+    loadUsersForAutocomplete().then(setUsers)
+  }, [])
 
   useEffect(() => {
     if (loaner) {
@@ -103,6 +117,72 @@ export default function LoanerForm({ loaner, onSave, onClose, mode = 'add' }: Lo
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
+  // Handle borrower name input with autocomplete
+  const handleBorrowerNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setFormData(prev => ({ ...prev, borrowerName: value }))
+    setSelectedUserIndex(-1)
+
+    if (value.length >= 2 && users.length > 0) {
+      const searchLower = value.toLowerCase()
+      const matches = users.filter(user =>
+        user.name.toLowerCase().includes(searchLower) ||
+        user.uid.toLowerCase().includes(searchLower) ||
+        user.email.toLowerCase().includes(searchLower)
+      ).slice(0, 10) // Limit to 10 results
+      setFilteredUsers(matches)
+      setShowUserDropdown(matches.length > 0)
+    } else {
+      setFilteredUsers([])
+      setShowUserDropdown(false)
+    }
+  }
+
+  // Handle user selection from dropdown
+  const selectUser = (user: UserAutocompleteData) => {
+    setFormData(prev => ({
+      ...prev,
+      borrowerName: user.name,
+      borrowerEmail: user.email,
+    }))
+    setShowUserDropdown(false)
+    setFilteredUsers([])
+  }
+
+  // Handle keyboard navigation in dropdown
+  const handleBorrowerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showUserDropdown || filteredUsers.length === 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelectedUserIndex(prev => Math.min(prev + 1, filteredUsers.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelectedUserIndex(prev => Math.max(prev - 1, 0))
+    } else if (e.key === 'Enter' && selectedUserIndex >= 0) {
+      e.preventDefault()
+      selectUser(filteredUsers[selectedUserIndex])
+    } else if (e.key === 'Escape') {
+      setShowUserDropdown(false)
+    }
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node) &&
+        userInputRef.current &&
+        !userInputRef.current.contains(e.target as Node)
+      ) {
+        setShowUserDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   const getTitle = () => {
     switch (mode) {
       case 'checkout':
@@ -137,7 +217,7 @@ Expected Return Date: ${formData.expectedReturnDate ? new Date(formData.expected
 
 Please return the device by the expected return date. If you need to extend your loan period, contact Batten IT.
 
-Questions? Contact batten-it@virginia.edu or call (434) 924-3900.
+Questions? Contact battensupport@virginia.edu or call (434) 924-0812.
 
 Thank you,
 Batten IT
@@ -165,7 +245,7 @@ If you need to extend your loan period, please reply to this email or contact us
 
 Thank you,
 Batten IT
-batten-it@virginia.edu | (434) 924-3900
+battensupport@virginia.edu | (434) 924-0812
 `)
     return `mailto:${loaner.borrowerEmail}?subject=${subject}&body=${body}`
   }
@@ -328,20 +408,57 @@ batten-it@virginia.edu | (434) 924-3900
             <div>
               <h3 className="text-lg font-semibold text-uva-navy mb-4 border-b pb-2">Borrower Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
+                <div className="relative">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Borrower Name <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    name="borrowerName"
-                    value={formData.borrowerName}
-                    onChange={handleChange}
-                    required={mode === 'checkout'}
-                    placeholder="e.g., John Smith"
-                    className="w-full px-4 py-2 border-2 border-gray-200 rounded-lg text-sm
-                             focus:outline-none focus:border-uva-orange transition-colors"
-                  />
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      ref={userInputRef}
+                      type="text"
+                      name="borrowerName"
+                      value={formData.borrowerName}
+                      onChange={handleBorrowerNameChange}
+                      onKeyDown={handleBorrowerKeyDown}
+                      onFocus={() => {
+                        if (formData.borrowerName.length >= 2 && filteredUsers.length > 0) {
+                          setShowUserDropdown(true)
+                        }
+                      }}
+                      required={mode === 'checkout'}
+                      placeholder="Start typing name..."
+                      autoComplete="off"
+                      className="w-full pl-10 pr-4 py-2 border-2 border-gray-200 rounded-lg text-sm
+                               focus:outline-none focus:border-uva-orange transition-colors"
+                    />
+                  </div>
+                  {/* User autocomplete dropdown */}
+                  {showUserDropdown && filteredUsers.length > 0 && (
+                    <div
+                      ref={dropdownRef}
+                      className="absolute z-50 w-full mt-1 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                    >
+                      {filteredUsers.map((user, index) => (
+                        <button
+                          key={user.uid}
+                          type="button"
+                          onClick={() => selectUser(user)}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-uva-orange/10 transition-colors ${
+                            index === selectedUserIndex ? 'bg-uva-orange/20' : ''
+                          }`}
+                        >
+                          <div className="font-medium text-gray-900">{user.name}</div>
+                          <div className="text-xs text-gray-500">{user.email}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {users.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {users.length} users available for lookup
+                    </p>
+                  )}
                 </div>
 
                 <div>

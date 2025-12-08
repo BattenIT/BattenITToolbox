@@ -419,3 +419,43 @@ export function loadDeviceDataSync(): Device[] {
   // For now, return empty array and use async version
   return []
 }
+
+/**
+ * User data for autocomplete
+ */
+export interface UserAutocompleteData {
+  uid: string
+  name: string
+  email: string
+}
+
+/**
+ * Load all Batten users for autocomplete functionality
+ */
+export async function loadUsersForAutocomplete(): Promise<UserAutocompleteData[]> {
+  try {
+    const text = await getCSVData('users')
+    if (!text) {
+      console.warn('Users CSV not found for autocomplete')
+      return []
+    }
+
+    const users = parseCSV<BattenUserData>(text)
+
+    // Transform to autocomplete format, filter out invalid entries
+    const autocompleteUsers: UserAutocompleteData[] = users
+      .filter(user => user.uid && user.name && user.mail)
+      .map(user => ({
+        uid: user.uid,
+        name: user.name,
+        email: user.mail,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    console.log(`Loaded ${autocompleteUsers.length} users for autocomplete`)
+    return autocompleteUsers
+  } catch (error) {
+    console.error('Error loading users for autocomplete:', error)
+    return []
+  }
+}

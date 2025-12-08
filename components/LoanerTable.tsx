@@ -185,7 +185,7 @@ If you need to extend your loan period, please reply to this email or contact us
 
 Thank you,
 Batten IT
-batten-it@virginia.edu | (434) 924-3900
+battensupport@virginia.edu | (434) 924-0812
 `)
     return `mailto:${loaner.borrowerEmail}?subject=${subject}&body=${body}`
   }
