@@ -4,6 +4,7 @@ import { useState } from 'react'
 import {
   LoanerLaptop,
   LoanerStatus,
+  LoanHistory,
   STATUS_LABELS,
   STATUS_BADGE_CLASSES,
 } from '@/types/loaner'
@@ -17,10 +18,14 @@ import {
   Laptop,
   RotateCcw,
   UserCheck,
+  History,
+  Mail,
 } from 'lucide-react'
+import LoanerHistoryModal from './LoanerHistoryModal'
 
 interface LoanerTableProps {
   loaners: LoanerLaptop[]
+  loanHistory: LoanHistory[]
   onEdit: (loaner: LoanerLaptop) => void
   onDelete: (id: string) => void
   onCheckout: (loaner: LoanerLaptop) => void
@@ -30,6 +35,7 @@ interface LoanerTableProps {
 
 export default function LoanerTable({
   loaners,
+  loanHistory,
   onEdit,
   onDelete,
   onCheckout,
@@ -41,6 +47,7 @@ export default function LoanerTable({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [statusFilter, setStatusFilter] = useState<LoanerStatus | 'all'>('all')
+  const [historyLoaner, setHistoryLoaner] = useState<LoanerLaptop | null>(null)
 
   const toggleRow = (id: string) => {
     const newExpanded = new Set(expandedRows)
@@ -142,6 +149,45 @@ export default function LoanerTable({
   const isOverdue = (loaner: LoanerLaptop) => {
     if (loaner.status !== 'checked-out' || !loaner.expectedReturnDate) return false
     return new Date(loaner.expectedReturnDate) < new Date()
+  }
+
+  const getHistoryCount = (loanerId: string) => {
+    return loanHistory.filter(h => h.loanerId === loanerId).length
+  }
+
+  const getLoanerHistory = (loanerId: string) => {
+    return loanHistory.filter(h => h.loanerId === loanerId)
+  }
+
+  // Generate mailto link for reminder email
+  const getReminderEmailLink = (loaner: LoanerLaptop) => {
+    if (!loaner.borrowerEmail) return null
+
+    const isOverdueDevice = isOverdue(loaner)
+    const subject = encodeURIComponent(
+      isOverdueDevice
+        ? `OVERDUE: Loaner Device Return Required - ${loaner.name}`
+        : `Reminder: Loaner Device Return - ${loaner.name}`
+    )
+    const body = encodeURIComponent(
+`Hi ${loaner.borrowerName},
+
+${isOverdueDevice ? 'This is an urgent reminder that your loaner device is OVERDUE for return.' : 'This is a friendly reminder about your loaner device.'}
+
+Device: ${loaner.name}
+Asset Tag: ${loaner.assetTag}
+Expected Return Date: ${loaner.expectedReturnDate ? new Date(loaner.expectedReturnDate).toLocaleDateString() : 'As soon as possible'}
+${isOverdueDevice ? '\nPlease return this device immediately.' : ''}
+
+Please return the device to Batten IT at your earliest convenience.
+
+If you need to extend your loan period, please reply to this email or contact us.
+
+Thank you,
+Batten IT
+batten-it@virginia.edu | (434) 924-3900
+`)
+    return `mailto:${loaner.borrowerEmail}?subject=${subject}&body=${body}`
   }
 
   return (
@@ -300,14 +346,41 @@ export default function LoanerTable({
                           </button>
                         )}
                         {loaner.status === 'checked-out' && (
-                          <button
-                            onClick={() => onReturn(loaner)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Return"
-                          >
-                            <RotateCcw className="w-4 h-4" />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => onReturn(loaner)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Return"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                            {loaner.borrowerEmail && (
+                              <a
+                                href={getReminderEmailLink(loaner) || '#'}
+                                className={`p-2 rounded-lg transition-colors ${
+                                  isOverdue(loaner)
+                                    ? 'text-red-600 hover:bg-red-50'
+                                    : 'text-orange-600 hover:bg-orange-50'
+                                }`}
+                                title={isOverdue(loaner) ? 'Send Overdue Notice' : 'Send Reminder'}
+                              >
+                                <Mail className="w-4 h-4" />
+                              </a>
+                            )}
+                          </>
                         )}
+                        <button
+                          onClick={() => setHistoryLoaner(loaner)}
+                          className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors relative"
+                          title="View History"
+                        >
+                          <History className="w-4 h-4" />
+                          {getHistoryCount(loaner.id) > 0 && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-purple-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                              {getHistoryCount(loaner.id)}
+                            </span>
+                          )}
+                        </button>
                         <button
                           onClick={() => onEdit(loaner)}
                           className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -383,6 +456,15 @@ export default function LoanerTable({
           </tbody>
         </table>
       </div>
+
+      {/* History Modal */}
+      {historyLoaner && (
+        <LoanerHistoryModal
+          loaner={historyLoaner}
+          history={getLoanerHistory(historyLoaner.id)}
+          onClose={() => setHistoryLoaner(null)}
+        />
+      )}
     </div>
   )
 }

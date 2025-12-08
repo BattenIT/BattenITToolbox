@@ -1,8 +1,9 @@
 "use client"
 
 import { Device } from '@/types/device'
-import { AlertCircle, AlertTriangle, CheckCircle, Download, Search, ChevronDown, ChevronRight } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, Download, Search, ChevronDown, ChevronRight, Eye } from 'lucide-react'
 import { useState } from 'react'
+import DeviceDetailModal from './DeviceDetailModal'
 
 interface DeviceTableProps {
   devices: Device[]
@@ -19,6 +20,7 @@ export default function DeviceTable({
   const [sortField, setSortField] = useState<keyof Device>('ageInYears')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
 
   // Toggle row expansion
   const toggleRow = (deviceId: string) => {
@@ -215,12 +217,15 @@ export default function DeviceTable({
               >
                 Last Seen {sortField === 'lastSeen' && (sortDirection === 'asc' ? '↑' : '↓')}
               </th>
+              <th className="px-4 py-3 text-right text-sm font-semibold text-uva-navy">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {sortedDevices.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
                   No devices found matching your criteria
                 </td>
               </tr>
@@ -278,12 +283,22 @@ export default function DeviceTable({
                     <td className="px-4 py-4 text-sm text-gray-700">
                       {device.lastSeen.toLocaleDateString()}
                     </td>
+                    <td className="px-4 py-4 text-right">
+                      <button
+                        onClick={() => setSelectedDevice(device)}
+                        className="px-3 py-1.5 bg-uva-navy text-white rounded-lg text-xs font-semibold
+                                 hover:bg-uva-navy/90 transition-colors inline-flex items-center gap-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        View
+                      </button>
+                    </td>
                   </tr>
 
                   {/* Expanded Detail Row */}
                   {expandedRows.has(device.id) && (
                     <tr key={`${device.id}-details`} className="bg-gray-50">
-                      <td colSpan={8} className="px-4 py-6">
+                      <td colSpan={9} className="px-4 py-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                           {/* Basic Info */}
                           <div className="space-y-3">
@@ -466,6 +481,14 @@ export default function DeviceTable({
           </tbody>
         </table>
       </div>
+
+      {/* Device Detail Modal */}
+      {selectedDevice && (
+        <DeviceDetailModal
+          device={selectedDevice}
+          onClose={() => setSelectedDevice(null)}
+        />
+      )}
     </div>
   )
 }

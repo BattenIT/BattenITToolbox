@@ -6,7 +6,7 @@ import {
   LoanerStatus,
   STATUS_LABELS,
 } from '@/types/loaner'
-import { X, Save } from 'lucide-react'
+import { X, Save, Mail } from 'lucide-react'
 
 interface LoanerFormProps {
   loaner?: LoanerLaptop | null
@@ -114,6 +114,60 @@ export default function LoanerForm({ loaner, onSave, onClose, mode = 'add' }: Lo
       default:
         return 'Add New Loaner Laptop'
     }
+  }
+
+  // Generate mailto link for checkout confirmation
+  const getCheckoutEmailLink = () => {
+    if (!formData.borrowerEmail) return null
+
+    const subject = encodeURIComponent(`Loaner Device Checkout Confirmation - ${formData.name || loaner?.name}`)
+    const body = encodeURIComponent(
+`Hi ${formData.borrowerName},
+
+This email confirms that you have checked out the following loaner device from Batten IT:
+
+Device: ${formData.name || loaner?.name}
+Asset Tag: ${formData.assetTag || loaner?.assetTag}
+${formData.manufacturer ? `Manufacturer: ${formData.manufacturer}` : ''}
+${formData.model ? `Model: ${formData.model}` : ''}
+${formData.serialNumber ? `Serial Number: ${formData.serialNumber}` : ''}
+
+Checkout Date: ${formData.checkoutDate ? new Date(formData.checkoutDate).toLocaleDateString() : 'Today'}
+Expected Return Date: ${formData.expectedReturnDate ? new Date(formData.expectedReturnDate).toLocaleDateString() : 'TBD'}
+
+Please return the device by the expected return date. If you need to extend your loan period, contact Batten IT.
+
+Questions? Contact batten-it@virginia.edu or call (434) 924-3900.
+
+Thank you,
+Batten IT
+`)
+    return `mailto:${formData.borrowerEmail}?subject=${subject}&body=${body}`
+  }
+
+  // Generate mailto link for return reminder
+  const getReminderEmailLink = () => {
+    if (!loaner?.borrowerEmail) return null
+
+    const subject = encodeURIComponent(`Reminder: Loaner Device Return - ${loaner.name}`)
+    const body = encodeURIComponent(
+`Hi ${loaner.borrowerName},
+
+This is a friendly reminder that your loaner device is due for return.
+
+Device: ${loaner.name}
+Asset Tag: ${loaner.assetTag}
+Expected Return Date: ${loaner.expectedReturnDate ? new Date(loaner.expectedReturnDate).toLocaleDateString() : 'As soon as possible'}
+
+Please return the device to Batten IT at your earliest convenience.
+
+If you need to extend your loan period, please reply to this email or contact us.
+
+Thank you,
+Batten IT
+batten-it@virginia.edu | (434) 924-3900
+`)
+    return `mailto:${loaner.borrowerEmail}?subject=${subject}&body=${body}`
   }
 
   return (
@@ -372,29 +426,57 @@ export default function LoanerForm({ loaner, onSave, onClose, mode = 'add' }: Lo
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2 border-2 border-gray-200 rounded-lg font-semibold
-                       text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={`px-6 py-2 text-white rounded-lg font-semibold
-                       transition-colors flex items-center gap-2 ${
-                         mode === 'return'
-                           ? 'bg-blue-600 hover:bg-blue-700'
-                           : mode === 'checkout'
-                           ? 'bg-green-600 hover:bg-green-700'
-                           : 'bg-uva-orange hover:bg-uva-orange-light'
-                       }`}
-            >
-              <Save className="w-4 h-4" />
-              {mode === 'return' ? 'Confirm Return' : mode === 'checkout' ? 'Check Out' : loaner ? 'Save Changes' : 'Add Loaner'}
-            </button>
+          <div className="flex justify-between items-center gap-3 pt-4 border-t">
+            {/* Email button - show for checkout when email is provided */}
+            <div>
+              {mode === 'checkout' && formData.borrowerEmail && (
+                <a
+                  href={getCheckoutEmailLink() || '#'}
+                  className="px-4 py-2 border-2 border-purple-300 bg-purple-50 rounded-lg font-semibold
+                           text-purple-700 hover:bg-purple-100 transition-colors inline-flex items-center gap-2"
+                  title="Opens your email client with a pre-filled checkout confirmation"
+                >
+                  <Mail className="w-4 h-4" />
+                  Email Confirmation
+                </a>
+              )}
+              {mode === 'return' && loaner?.borrowerEmail && (
+                <a
+                  href={getReminderEmailLink() || '#'}
+                  className="px-4 py-2 border-2 border-purple-300 bg-purple-50 rounded-lg font-semibold
+                           text-purple-700 hover:bg-purple-100 transition-colors inline-flex items-center gap-2"
+                  title="Opens your email client with a pre-filled return thank you"
+                >
+                  <Mail className="w-4 h-4" />
+                  Email Thank You
+                </a>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-6 py-2 border-2 border-gray-200 rounded-lg font-semibold
+                         text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={`px-6 py-2 text-white rounded-lg font-semibold
+                         transition-colors flex items-center gap-2 ${
+                           mode === 'return'
+                             ? 'bg-blue-600 hover:bg-blue-700'
+                             : mode === 'checkout'
+                             ? 'bg-green-600 hover:bg-green-700'
+                             : 'bg-uva-orange hover:bg-uva-orange-light'
+                         }`}
+              >
+                <Save className="w-4 h-4" />
+                {mode === 'return' ? 'Confirm Return' : mode === 'checkout' ? 'Check Out' : loaner ? 'Save Changes' : 'Add Loaner'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

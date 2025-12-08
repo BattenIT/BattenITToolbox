@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation'
 import { Device } from '@/types/device'
 import { MetricCardData } from '@/types/metric'
 import { InventoryItem, InventorySummary, CATEGORY_LABELS, STATUS_LABELS } from '@/types/inventory'
-import { LoanerLaptop, LoanerSummary, STATUS_LABELS as LOANER_STATUS_LABELS } from '@/types/loaner'
+import { LoanerLaptop, LoanerSummary, LoanHistory, STATUS_LABELS as LOANER_STATUS_LABELS } from '@/types/loaner'
 import { loadDeviceData, calculateDeviceSummary, saveCSVToStorage } from '@/utils/dataLoader'
 import CSVUploader from '@/components/CSVUploader'
 
@@ -26,7 +26,7 @@ export default function Home() {
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<TabView>('overview')
-  const [filterView, setFilterView] = useState<FilterView>('attention')
+  const [filterView, setFilterView] = useState<FilterView>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [userLookup, setUserLookup] = useState('')
   const [showBudgetTool, setShowBudgetTool] = useState(false)
@@ -40,6 +40,7 @@ export default function Home() {
 
   // Loaner state
   const [loanerLaptops, setLoanerLaptops] = useState<LoanerLaptop[]>([])
+  const [loanHistory, setLoanHistory] = useState<LoanHistory[]>([])
   const [showLoanerForm, setShowLoanerForm] = useState(false)
   const [editingLoaner, setEditingLoaner] = useState<LoanerLaptop | null>(null)
   const [loanerFormMode, setLoanerFormMode] = useState<'add' | 'edit' | 'checkout' | 'return'>('add')
@@ -139,6 +140,18 @@ export default function Home() {
         }))
         setLoanerLaptops(loaners)
       }
+
+      // Load loan history
+      const storedHistory = localStorage.getItem('batten-loan-history')
+      if (storedHistory) {
+        const history = JSON.parse(storedHistory).map((entry: LoanHistory) => ({
+          ...entry,
+          checkoutDate: new Date(entry.checkoutDate),
+          expectedReturnDate: entry.expectedReturnDate ? new Date(entry.expectedReturnDate) : undefined,
+          actualReturnDate: entry.actualReturnDate ? new Date(entry.actualReturnDate) : undefined,
+        }))
+        setLoanHistory(history)
+      }
     } catch (error) {
       console.error('Error loading loaners:', error)
     }
@@ -153,9 +166,48 @@ export default function Home() {
     }
   }
 
+  // Save loan history to localStorage
+  const saveLoanHistory = (history: LoanHistory[]) => {
+    try {
+      localStorage.setItem('batten-loan-history', JSON.stringify(history))
+    } catch (error) {
+      console.error('Error saving loan history:', error)
+    }
+  }
+
+  // Add a loan history entry
+  const addLoanHistoryEntry = (entry: Omit<LoanHistory, 'id'>) => {
+    const newEntry: LoanHistory = {
+      ...entry,
+      id: `history-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    }
+    const updatedHistory = [...loanHistory, newEntry]
+    setLoanHistory(updatedHistory)
+    saveLoanHistory(updatedHistory)
+    return newEntry.id
+  }
+
+  // Update a loan history entry (for recording return)
+  const updateLoanHistoryEntry = (loanerId: string, actualReturnDate: Date, notes?: string) => {
+    const updatedHistory = loanHistory.map(entry => {
+      // Find the most recent active (no return date) entry for this loaner
+      if (entry.loanerId === loanerId && !entry.actualReturnDate) {
+        return {
+          ...entry,
+          actualReturnDate,
+          notes: notes || entry.notes,
+        }
+      }
+      return entry
+    })
+    setLoanHistory(updatedHistory)
+    saveLoanHistory(updatedHistory)
+  }
+
   // Handle loaner save (add, edit, checkout, return)
   const handleLoanerSave = (loanerData: Omit<LoanerLaptop, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
     const now = new Date()
+    const existingLoaner = loanerData.id ? loanerLaptops.find(l => l.id === loanerData.id) : null
 
     if (loanerData.id) {
       // Edit existing loaner
@@ -166,6 +218,28 @@ export default function Home() {
       )
       setLoanerLaptops(updatedLoaners)
       saveLoaners(updatedLoaners)
+
+      // Track checkout: if status changed from available to checked-out
+      if (existingLoaner && existingLoaner.status === 'available' && loanerData.status === 'checked-out') {
+        addLoanHistoryEntry({
+          loanerId: loanerData.id,
+          borrowerName: loanerData.borrowerName || 'Unknown',
+          borrowerEmail: loanerData.borrowerEmail,
+          borrowerDepartment: loanerData.borrowerDepartment,
+          checkoutDate: loanerData.checkoutDate || now,
+          expectedReturnDate: loanerData.expectedReturnDate,
+          notes: loanerData.notes,
+        })
+      }
+
+      // Track return: if status changed from checked-out to available
+      if (existingLoaner && existingLoaner.status === 'checked-out' && loanerData.status === 'available') {
+        updateLoanHistoryEntry(
+          loanerData.id,
+          loanerData.actualReturnDate || now,
+          loanerData.notes
+        )
+      }
     } else {
       // Add new loaner
       const newLoaner: LoanerLaptop = {
@@ -1357,6 +1431,7 @@ export default function Home() {
                   ) : (
                     <LoanerTable
                       loaners={loanerLaptops}
+                      loanHistory={loanHistory}
                       onEdit={handleLoanerEdit}
                       onDelete={handleLoanerDelete}
                       onCheckout={handleLoanerCheckout}
