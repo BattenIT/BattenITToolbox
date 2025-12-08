@@ -5,15 +5,21 @@ import Header from '@/components/Header'
 import Footer from '@/components/Footer'
 import MetricCard from '@/components/MetricCard'
 import DeviceTable from '@/components/DeviceTable'
-import { AlertCircle, AlertTriangle, CheckCircle, Laptop, Shield, Clock, Database, Search, User, DollarSign, TrendingUp, Upload, BarChart3, Settings } from 'lucide-react'
+import InventoryTable from '@/components/InventoryTable'
+import InventoryForm from '@/components/InventoryForm'
+import LoanerTable from '@/components/LoanerTable'
+import LoanerForm from '@/components/LoanerForm'
+import { AlertCircle, AlertTriangle, CheckCircle, Laptop, Shield, Clock, Database, Search, User, DollarSign, TrendingUp, Upload, BarChart3, Settings, Package, Plus, MonitorSmartphone } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Device } from '@/types/device'
 import { MetricCardData } from '@/types/metric'
+import { InventoryItem, InventorySummary, CATEGORY_LABELS, STATUS_LABELS } from '@/types/inventory'
+import { LoanerLaptop, LoanerSummary, STATUS_LABELS as LOANER_STATUS_LABELS } from '@/types/loaner'
 import { loadDeviceData, calculateDeviceSummary, saveCSVToStorage } from '@/utils/dataLoader'
 import CSVUploader from '@/components/CSVUploader'
 
 type FilterView = 'attention' | 'all' | 'critical' | 'warning' | 'good' | 'inactive' | 'active' | 'jamf' | 'intune' | 'replacement'
-type TabView = 'overview' | 'devices' | 'security' | 'tools'
+type TabView = 'overview' | 'devices' | 'security' | 'inventory' | 'loaners' | 'tools'
 
 export default function Home() {
   const router = useRouter()
@@ -27,10 +33,222 @@ export default function Home() {
   const [showCSVUploader, setShowCSVUploader] = useState(false)
   const [devicesPerPage, setDevicesPerPage] = useState<number>(25)
 
+  // Inventory state
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
+  const [showInventoryForm, setShowInventoryForm] = useState(false)
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+
+  // Loaner state
+  const [loanerLaptops, setLoanerLaptops] = useState<LoanerLaptop[]>([])
+  const [showLoanerForm, setShowLoanerForm] = useState(false)
+  const [editingLoaner, setEditingLoaner] = useState<LoanerLaptop | null>(null)
+  const [loanerFormMode, setLoanerFormMode] = useState<'add' | 'edit' | 'checkout' | 'return'>('add')
+
   // Load device data on mount
   useEffect(() => {
     loadData()
+    loadInventory()
+    loadLoaners()
   }, [])
+
+  // Load inventory from localStorage
+  const loadInventory = () => {
+    try {
+      const stored = localStorage.getItem('batten-inventory')
+      if (stored) {
+        const items = JSON.parse(stored).map((item: InventoryItem) => ({
+          ...item,
+          purchaseDate: item.purchaseDate ? new Date(item.purchaseDate) : undefined,
+          warrantyExpiration: item.warrantyExpiration ? new Date(item.warrantyExpiration) : undefined,
+          createdAt: new Date(item.createdAt),
+          updatedAt: new Date(item.updatedAt),
+        }))
+        setInventoryItems(items)
+      }
+    } catch (error) {
+      console.error('Error loading inventory:', error)
+    }
+  }
+
+  // Save inventory to localStorage
+  const saveInventory = (items: InventoryItem[]) => {
+    try {
+      localStorage.setItem('batten-inventory', JSON.stringify(items))
+    } catch (error) {
+      console.error('Error saving inventory:', error)
+    }
+  }
+
+  // Handle inventory item save (add or edit)
+  const handleInventorySave = (itemData: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
+    const now = new Date()
+
+    if (itemData.id) {
+      // Edit existing item
+      const updatedItems = inventoryItems.map(item =>
+        item.id === itemData.id
+          ? { ...item, ...itemData, updatedAt: now }
+          : item
+      )
+      setInventoryItems(updatedItems)
+      saveInventory(updatedItems)
+    } else {
+      // Add new item
+      const newItem: InventoryItem = {
+        ...itemData,
+        id: `inv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        createdAt: now,
+        updatedAt: now,
+      } as InventoryItem
+      const updatedItems = [...inventoryItems, newItem]
+      setInventoryItems(updatedItems)
+      saveInventory(updatedItems)
+    }
+
+    setShowInventoryForm(false)
+    setEditingItem(null)
+  }
+
+  // Handle inventory item delete
+  const handleInventoryDelete = (id: string) => {
+    if (confirm('Are you sure you want to delete this item?')) {
+      const updatedItems = inventoryItems.filter(item => item.id !== id)
+      setInventoryItems(updatedItems)
+      saveInventory(updatedItems)
+    }
+  }
+
+  // Handle inventory item edit
+  const handleInventoryEdit = (item: InventoryItem) => {
+    setEditingItem(item)
+    setShowInventoryForm(true)
+  }
+
+  // Load loaners from localStorage
+  const loadLoaners = () => {
+    try {
+      const stored = localStorage.getItem('batten-loaners')
+      if (stored) {
+        const loaners = JSON.parse(stored).map((loaner: LoanerLaptop) => ({
+          ...loaner,
+          checkoutDate: loaner.checkoutDate ? new Date(loaner.checkoutDate) : undefined,
+          expectedReturnDate: loaner.expectedReturnDate ? new Date(loaner.expectedReturnDate) : undefined,
+          actualReturnDate: loaner.actualReturnDate ? new Date(loaner.actualReturnDate) : undefined,
+          createdAt: new Date(loaner.createdAt),
+          updatedAt: new Date(loaner.updatedAt),
+        }))
+        setLoanerLaptops(loaners)
+      }
+    } catch (error) {
+      console.error('Error loading loaners:', error)
+    }
+  }
+
+  // Save loaners to localStorage
+  const saveLoaners = (loaners: LoanerLaptop[]) => {
+    try {
+      localStorage.setItem('batten-loaners', JSON.stringify(loaners))
+    } catch (error) {
+      console.error('Error saving loaners:', error)
+    }
+  }
+
+  // Handle loaner save (add, edit, checkout, return)
+  const handleLoanerSave = (loanerData: Omit<LoanerLaptop, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
+    const now = new Date()
+
+    if (loanerData.id) {
+      // Edit existing loaner
+      const updatedLoaners = loanerLaptops.map(loaner =>
+        loaner.id === loanerData.id
+          ? { ...loaner, ...loanerData, updatedAt: now }
+          : loaner
+      )
+      setLoanerLaptops(updatedLoaners)
+      saveLoaners(updatedLoaners)
+    } else {
+      // Add new loaner
+      const newLoaner: LoanerLaptop = {
+        ...loanerData,
+        id: `loaner-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        createdAt: now,
+        updatedAt: now,
+      } as LoanerLaptop
+      const updatedLoaners = [...loanerLaptops, newLoaner]
+      setLoanerLaptops(updatedLoaners)
+      saveLoaners(updatedLoaners)
+    }
+
+    setShowLoanerForm(false)
+    setEditingLoaner(null)
+    setLoanerFormMode('add')
+  }
+
+  // Handle loaner delete
+  const handleLoanerDelete = (id: string) => {
+    if (confirm('Are you sure you want to delete this loaner laptop?')) {
+      const updatedLoaners = loanerLaptops.filter(loaner => loaner.id !== id)
+      setLoanerLaptops(updatedLoaners)
+      saveLoaners(updatedLoaners)
+    }
+  }
+
+  // Handle loaner edit
+  const handleLoanerEdit = (loaner: LoanerLaptop) => {
+    setEditingLoaner(loaner)
+    setLoanerFormMode('edit')
+    setShowLoanerForm(true)
+  }
+
+  // Handle loaner checkout
+  const handleLoanerCheckout = (loaner: LoanerLaptop) => {
+    setEditingLoaner(loaner)
+    setLoanerFormMode('checkout')
+    setShowLoanerForm(true)
+  }
+
+  // Handle loaner return
+  const handleLoanerReturn = (loaner: LoanerLaptop) => {
+    setEditingLoaner(loaner)
+    setLoanerFormMode('return')
+    setShowLoanerForm(true)
+  }
+
+  // Calculate loaner summary
+  const loanerSummary: LoanerSummary = {
+    totalLoaners: loanerLaptops.length,
+    available: loanerLaptops.filter(l => l.status === 'available').length,
+    checkedOut: loanerLaptops.filter(l => l.status === 'checked-out').length,
+    inMaintenance: loanerLaptops.filter(l => l.status === 'maintenance').length,
+    retired: loanerLaptops.filter(l => l.status === 'retired').length,
+    overdueCount: loanerLaptops.filter(l => {
+      if (l.status !== 'checked-out' || !l.expectedReturnDate) return false
+      return new Date(l.expectedReturnDate) < new Date()
+    }).length,
+  }
+
+  // Calculate inventory summary
+  const inventorySummary: InventorySummary = {
+    totalItems: inventoryItems.length,
+    totalValue: inventoryItems.reduce((sum, item) => sum + (item.purchasePrice || 0), 0),
+    byCategory: inventoryItems.reduce((acc, item) => {
+      acc[item.category] = (acc[item.category] || 0) + 1
+      return acc
+    }, {} as Record<string, number>) as InventorySummary['byCategory'],
+    byStatus: inventoryItems.reduce((acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1
+      return acc
+    }, {} as Record<string, number>) as InventorySummary['byStatus'],
+    warrantyExpiringSoon: inventoryItems.filter(item => {
+      if (!item.warrantyExpiration) return false
+      const daysUntilExpiry = (new Date(item.warrantyExpiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+      return daysUntilExpiry > 0 && daysUntilExpiry <= 90
+    }).length,
+    recentlyAdded: inventoryItems.filter(item => {
+      const daysSinceAdded = (Date.now() - new Date(item.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+      return daysSinceAdded <= 30
+    }).length,
+  }
 
   const loadData = async () => {
     try {
@@ -281,7 +499,7 @@ export default function Home() {
 
       <main className="flex-1">
         {/* Main Content */}
-        <section className="max-w-[1920px] mx-auto px-8 py-12 pt-8">
+        <section className="max-w-[2400px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16 py-8">
           {loading ? (
             <div className="flex items-center justify-center h-96">
               <div className="text-center">
@@ -301,54 +519,93 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {/* Tab Navigation */}
-              <div className="mb-8">
-                <div className="border-b-2 border-gray-200">
-                  <div className="flex gap-1 overflow-x-auto">
+              {/* Tab Navigation - Folder Style */}
+              <div className="mb-6">
+                <div className="flex gap-1 overflow-x-auto pb-0">
+                  <button
+                    onClick={() => setActiveTab('overview')}
+                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
+                      activeTab === 'overview'
+                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
+                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
+                    }`}
+                    style={activeTab === 'overview' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('devices')}
+                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
+                      activeTab === 'devices'
+                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
+                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
+                    }`}
+                    style={activeTab === 'devices' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
+                  >
+                    All Devices
+                  </button>
+                  {securityMetrics.length > 0 && (
                     <button
-                      onClick={() => setActiveTab('overview')}
-                      className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
-                        activeTab === 'overview'
-                          ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
-                          : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
+                      onClick={() => setActiveTab('security')}
+                      className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
+                        activeTab === 'security'
+                          ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
+                          : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
                       }`}
+                      style={activeTab === 'security' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
                     >
-                      Overview
+                      Security
                     </button>
-                    <button
-                      onClick={() => setActiveTab('devices')}
-                      className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
-                        activeTab === 'devices'
-                          ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
-                          : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
-                      }`}
-                    >
-                      All Devices
-                    </button>
-                    {securityMetrics.length > 0 && (
-                      <button
-                        onClick={() => setActiveTab('security')}
-                        className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
-                          activeTab === 'security'
-                            ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
-                            : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
-                        }`}
-                      >
-                        Security
-                      </button>
+                  )}
+                  <button
+                    onClick={() => setActiveTab('inventory')}
+                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative flex items-center gap-2 ${
+                      activeTab === 'inventory'
+                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
+                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
+                    }`}
+                    style={activeTab === 'inventory' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
+                  >
+                    Inventory
+                    {inventoryItems.length > 0 && (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">
+                        {inventoryItems.length}
+                      </span>
                     )}
-                    <button
-                      onClick={() => setActiveTab('tools')}
-                      className={`px-6 py-3 font-semibold text-sm transition-all whitespace-nowrap ${
-                        activeTab === 'tools'
-                          ? 'border-b-4 border-uva-orange text-uva-orange bg-orange-50'
-                          : 'text-gray-600 hover:text-uva-navy hover:bg-gray-50'
-                      }`}
-                    >
-                      Tools & Settings
-                    </button>
-                  </div>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('loaners')}
+                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative flex items-center gap-2 ${
+                      activeTab === 'loaners'
+                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
+                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
+                    }`}
+                    style={activeTab === 'loaners' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
+                  >
+                    Loaner Laptops
+                    {loanerLaptops.length > 0 && (
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        loanerSummary.overdueCount > 0
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-cyan-100 text-cyan-700'
+                      }`}>
+                        {loanerLaptops.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('tools')}
+                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
+                      activeTab === 'tools'
+                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
+                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
+                    }`}
+                    style={activeTab === 'tools' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
+                  >
+                    Tools & Settings
+                  </button>
                 </div>
+                <div className="border-t-2 border-gray-300"></div>
               </div>
 
               {/* OVERVIEW TAB */}
@@ -907,6 +1164,208 @@ export default function Home() {
                   )}
                 </div>
               )}
+
+              {/* INVENTORY TAB */}
+              {activeTab === 'inventory' && (
+                <div className="animate-fade-in">
+                  {/* Header with Add Button */}
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                    <div className="flex items-center gap-3">
+                      <Package className="w-8 h-8 text-purple-600" />
+                      <div>
+                        <h2 className="text-3xl font-serif font-bold text-uva-navy">
+                          Inventory Management
+                        </h2>
+                        <p className="text-gray-600">Track expensive items, equipment, and assets</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingItem(null)
+                        setShowInventoryForm(true)
+                      }}
+                      className="px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold
+                               hover:bg-purple-700 transition-colors flex items-center gap-2"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Add Item
+                    </button>
+                  </div>
+
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-purple-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Package className="w-6 h-6 text-purple-600" />
+                        <span className="text-sm font-semibold text-gray-600">Total Items</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-uva-navy">{inventorySummary.totalItems}</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-green-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <DollarSign className="w-6 h-6 text-green-600" />
+                        <span className="text-sm font-semibold text-gray-600">Total Value</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-green-600">
+                        ${inventorySummary.totalValue.toLocaleString()}
+                      </p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-yellow-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <AlertTriangle className="w-6 h-6 text-yellow-600" />
+                        <span className="text-sm font-semibold text-gray-600">Warranty Expiring</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-yellow-600">{inventorySummary.warrantyExpiringSoon}</p>
+                      <p className="text-xs text-gray-500">Within 90 days</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-blue-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Clock className="w-6 h-6 text-blue-600" />
+                        <span className="text-sm font-semibold text-gray-600">Recently Added</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-blue-600">{inventorySummary.recentlyAdded}</p>
+                      <p className="text-xs text-gray-500">Last 30 days</p>
+                    </div>
+                  </div>
+
+                  {/* Inventory Table */}
+                  {inventoryItems.length === 0 ? (
+                    <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-12 text-center">
+                      <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <h3 className="text-xl font-bold text-uva-navy mb-2">No Inventory Items</h3>
+                      <p className="text-gray-600 mb-6">
+                        Start tracking your expensive equipment, monitors, printers, and other assets.
+                      </p>
+                      <button
+                        onClick={() => {
+                          setEditingItem(null)
+                          setShowInventoryForm(true)
+                        }}
+                        className="px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold
+                                 hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
+                      >
+                        <Plus className="w-5 h-5" />
+                        Add Your First Item
+                      </button>
+                    </div>
+                  ) : (
+                    <InventoryTable
+                      items={inventoryItems}
+                      onEdit={handleInventoryEdit}
+                      onDelete={handleInventoryDelete}
+                      title="All Inventory Items"
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* LOANERS TAB */}
+              {activeTab === 'loaners' && (
+                <div className="animate-fade-in">
+                  {/* Header with Add Button */}
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                    <div className="flex items-center gap-3">
+                      <MonitorSmartphone className="w-8 h-8 text-cyan-600" />
+                      <div>
+                        <h2 className="text-3xl font-serif font-bold text-uva-navy">
+                          Loaner Laptop Management
+                        </h2>
+                        <p className="text-gray-600">Track loaner devices, checkouts, and returns</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingLoaner(null)
+                        setLoanerFormMode('add')
+                        setShowLoanerForm(true)
+                      }}
+                      className="px-6 py-3 bg-cyan-600 text-white rounded-lg font-semibold
+                               hover:bg-cyan-700 transition-colors flex items-center gap-2"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Add Loaner
+                    </button>
+                  </div>
+
+                  {/* Summary Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-cyan-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <MonitorSmartphone className="w-6 h-6 text-cyan-600" />
+                        <span className="text-sm font-semibold text-gray-600">Total Loaners</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-uva-navy">{loanerSummary.totalLoaners}</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-green-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <CheckCircle className="w-6 h-6 text-green-600" />
+                        <span className="text-sm font-semibold text-gray-600">Available</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-green-600">{loanerSummary.available}</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-yellow-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <User className="w-6 h-6 text-yellow-600" />
+                        <span className="text-sm font-semibold text-gray-600">Checked Out</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-yellow-600">{loanerSummary.checkedOut}</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-red-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <AlertTriangle className="w-6 h-6 text-red-600" />
+                        <span className="text-sm font-semibold text-gray-600">Overdue</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-red-600">{loanerSummary.overdueCount}</p>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-2xl border-4 border-blue-200 p-6">
+                      <div className="flex items-center gap-3 mb-2">
+                        <Clock className="w-6 h-6 text-blue-600" />
+                        <span className="text-sm font-semibold text-gray-600">In Maintenance</span>
+                      </div>
+                      <p className="text-3xl font-serif font-bold text-blue-600">{loanerSummary.inMaintenance}</p>
+                    </div>
+                  </div>
+
+                  {/* Loaner Table */}
+                  {loanerLaptops.length === 0 ? (
+                    <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-12 text-center">
+                      <MonitorSmartphone className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <h3 className="text-xl font-bold text-uva-navy mb-2">No Loaner Laptops</h3>
+                      <p className="text-gray-600 mb-6">
+                        Start tracking your loaner laptop pool for temporary device assignments.
+                      </p>
+                      <button
+                        onClick={() => {
+                          setEditingLoaner(null)
+                          setLoanerFormMode('add')
+                          setShowLoanerForm(true)
+                        }}
+                        className="px-6 py-3 bg-cyan-600 text-white rounded-lg font-semibold
+                                 hover:bg-cyan-700 transition-colors inline-flex items-center gap-2"
+                      >
+                        <Plus className="w-5 h-5" />
+                        Add Your First Loaner
+                      </button>
+                    </div>
+                  ) : (
+                    <LoanerTable
+                      loaners={loanerLaptops}
+                      onEdit={handleLoanerEdit}
+                      onDelete={handleLoanerDelete}
+                      onCheckout={handleLoanerCheckout}
+                      onReturn={handleLoanerReturn}
+                      title="All Loaner Laptops"
+                    />
+                  )}
+                </div>
+              )}
             </>
           )}
         </section>
@@ -919,6 +1378,32 @@ export default function Home() {
         <CSVUploader
           onUpload={handleCSVUpload}
           onClose={handleCSVUploadComplete}
+        />
+      )}
+
+      {/* Inventory Form Modal */}
+      {showInventoryForm && (
+        <InventoryForm
+          item={editingItem}
+          onSave={handleInventorySave}
+          onClose={() => {
+            setShowInventoryForm(false)
+            setEditingItem(null)
+          }}
+        />
+      )}
+
+      {/* Loaner Form Modal */}
+      {showLoanerForm && (
+        <LoanerForm
+          loaner={editingLoaner}
+          onSave={handleLoanerSave}
+          onClose={() => {
+            setShowLoanerForm(false)
+            setEditingLoaner(null)
+            setLoanerFormMode('add')
+          }}
+          mode={loanerFormMode}
         />
       )}
     </div>
