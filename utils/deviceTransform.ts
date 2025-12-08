@@ -3,7 +3,7 @@
  * Converts raw CSV data from Intune and Jamf into unified Device types
  */
 
-import { Device, DeviceStatus, OSType, Vulnerability } from '@/types/device'
+import { Device, DeviceStatus, OSType, Vulnerability, ActivityStatus } from '@/types/device'
 import { IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData, EntraDeviceData, parseDate, yearsBetween, daysBetween } from './csvParser'
 import { extractComputingIdsFromDeviceName } from './dataLoader'
 
@@ -649,7 +649,7 @@ export function mergeQualysData(
       // Parse Qualys data
       const truRiskScore = parseInt(qualysAsset['TruRisk Score']) || undefined
       const criticalityScore = parseInt(qualysAsset['CriticalityScore']) || undefined
-      const lastVulnScan = parseDate(qualysAsset['Last Vuln Scan']) || undefined
+      const lastVulnScan = qualysAsset['Last Vuln Scan'] ? (parseDate(qualysAsset['Last Vuln Scan']) || undefined) : undefined
 
       // Count vulnerabilities by severity
       const criticalVulns = deviceVulns.filter(v => v.Severity === '5')

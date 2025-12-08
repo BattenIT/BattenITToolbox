@@ -75,6 +75,7 @@ export interface QualysAssetData {
   'Inventory Created On': string
   'Inventory Last Updated On': string
   'Architecture': string
+  'Last Vuln Scan'?: string
 }
 
 export interface QualysVulnData {
