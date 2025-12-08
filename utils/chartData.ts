@@ -10,6 +10,7 @@ export interface ChartDataPoint {
   value: number
   percentage?: number
   fill?: string
+  [key: string]: string | number | undefined
 }
 
 /**
