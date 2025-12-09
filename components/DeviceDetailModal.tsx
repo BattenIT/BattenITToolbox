@@ -50,8 +50,9 @@ export default function DeviceDetailModal({ device, onClose, onToggleRetire }: D
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-8 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[calc(100vh-4rem)] overflow-hidden flex flex-col my-auto">
+    <div className="fixed inset-0 bg-black/50 z-50 overflow-y-auto">
+      <div className="min-h-full flex items-center justify-center p-4 py-8">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className={`${statusStyle.bg} ${statusStyle.border} border-b-2 px-6 py-4`}>
           <div className="flex justify-between items-start">
@@ -412,6 +413,7 @@ export default function DeviceDetailModal({ device, onClose, onToggleRetire }: D
               Close
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>
