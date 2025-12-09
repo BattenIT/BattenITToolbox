@@ -18,7 +18,7 @@ import { LoanerLaptop, LoanerSummary, LoanHistory, STATUS_LABELS as LOANER_STATU
 import { loadDeviceData, calculateDeviceSummary, saveCSVToStorage } from '@/utils/dataLoader'
 import CSVUploader from '@/components/CSVUploader'
 
-type FilterView = 'attention' | 'all' | 'critical' | 'warning' | 'good' | 'inactive' | 'active' | 'jamf' | 'intune' | 'replacement'
+type FilterView = 'attention' | 'all' | 'critical' | 'warning' | 'good' | 'inactive' | 'active' | 'jamf' | 'intune' | 'replacement' | 'retired'
 type TabView = 'overview' | 'devices' | 'security' | 'inventory' | 'loaners' | 'tools'
 
 export default function Home() {
@@ -44,6 +44,50 @@ export default function Home() {
   const [showLoanerForm, setShowLoanerForm] = useState(false)
   const [editingLoaner, setEditingLoaner] = useState<LoanerLaptop | null>(null)
   const [loanerFormMode, setLoanerFormMode] = useState<'add' | 'edit' | 'checkout' | 'return'>('add')
+
+  // Load retired device IDs from localStorage
+  const loadRetiredDeviceIds = (): Set<string> => {
+    try {
+      const stored = localStorage.getItem('batten-retired-devices')
+      if (stored) {
+        return new Set(JSON.parse(stored))
+      }
+    } catch (error) {
+      console.error('Error loading retired devices:', error)
+    }
+    return new Set()
+  }
+
+  // Save retired device IDs to localStorage
+  const saveRetiredDeviceIds = (retiredIds: Set<string>) => {
+    try {
+      localStorage.setItem('batten-retired-devices', JSON.stringify([...retiredIds]))
+    } catch (error) {
+      console.error('Error saving retired devices:', error)
+    }
+  }
+
+  // Toggle device retired status
+  const handleToggleRetire = (deviceId: string, isRetired: boolean) => {
+    const retiredIds = loadRetiredDeviceIds()
+
+    if (isRetired) {
+      retiredIds.add(deviceId)
+    } else {
+      retiredIds.delete(deviceId)
+    }
+
+    saveRetiredDeviceIds(retiredIds)
+
+    // Update devices state with new retired status
+    setDevices(prevDevices =>
+      prevDevices.map(device =>
+        device.id === deviceId
+          ? { ...device, isRetired }
+          : device
+      )
+    )
+  }
 
   // Load device data on mount
   useEffect(() => {
@@ -328,7 +372,15 @@ export default function Home() {
     try {
       setLoading(true)
       const deviceData = await loadDeviceData()
-      setDevices(deviceData)
+
+      // Apply retired status from localStorage
+      const retiredIds = loadRetiredDeviceIds()
+      const devicesWithRetiredStatus = deviceData.map(device => ({
+        ...device,
+        isRetired: retiredIds.has(device.id)
+      }))
+
+      setDevices(devicesWithRetiredStatus)
     } catch (error) {
       console.error('Error loading devices:', error)
     } finally {
@@ -357,35 +409,39 @@ export default function Home() {
     // Apply status/source filters
     switch (filterView) {
       case 'critical':
-        filtered = devices.filter(d => d.status === 'critical')
+        filtered = devices.filter(d => d.status === 'critical' && !d.isRetired)
         break
       case 'warning':
-        filtered = devices.filter(d => d.status === 'warning')
+        filtered = devices.filter(d => d.status === 'warning' && !d.isRetired)
         break
       case 'good':
-        filtered = devices.filter(d => d.status === 'good')
+        filtered = devices.filter(d => d.status === 'good' && !d.isRetired)
         break
       case 'inactive':
-        filtered = devices.filter(d => d.status === 'inactive')
+        filtered = devices.filter(d => d.status === 'inactive' && !d.isRetired)
         break
       case 'active':
-        filtered = devices.filter(d => d.activityStatus === 'active')
+        filtered = devices.filter(d => d.activityStatus === 'active' && !d.isRetired)
         break
       case 'jamf':
-        filtered = devices.filter(d => d.source === 'jamf')
+        filtered = devices.filter(d => d.source === 'jamf' && !d.isRetired)
         break
       case 'intune':
-        filtered = devices.filter(d => d.source === 'intune')
+        filtered = devices.filter(d => d.source === 'intune' && !d.isRetired)
         break
       case 'replacement':
-        filtered = devices.filter(d => d.replacementRecommended)
+        filtered = devices.filter(d => d.replacementRecommended && !d.isRetired)
         break
       case 'attention':
-        filtered = devices.filter(d => d.status === 'critical' || d.status === 'warning' || d.replacementRecommended)
+        filtered = devices.filter(d => !d.isRetired && (d.status === 'critical' || d.status === 'warning' || d.replacementRecommended))
+        break
+      case 'retired':
+        filtered = devices.filter(d => d.isRetired)
         break
       case 'all':
       default:
-        // No filter
+        // Show all non-retired by default, unless explicitly searching
+        filtered = devices.filter(d => !d.isRetired)
         break
     }
 
@@ -439,6 +495,8 @@ export default function Home() {
         return { title: 'Intune Devices', description: 'Devices managed by Microsoft Intune' }
       case 'replacement':
         return { title: 'Replacement Needed', description: 'Devices flagged for replacement' }
+      case 'retired':
+        return { title: 'Retired Devices', description: 'Devices marked as retired (excluded from counts)' }
       case 'attention':
       default:
         return { title: 'Devices Needing Attention', description: 'Critical, warning, or replacement recommended' }
@@ -890,6 +948,18 @@ export default function Home() {
                       >
                         Replacement ({summary.devicesNeedingReplacement})
                       </button>
+                      {summary.retiredCount > 0 && (
+                        <button
+                          onClick={() => setFilterView('retired')}
+                          className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                            filterView === 'retired'
+                              ? 'bg-gray-600 text-white shadow-lg'
+                              : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-600'
+                          }`}
+                        >
+                          Retired ({summary.retiredCount})
+                        </button>
+                      )}
                     </div>
                     <p className="text-sm text-gray-600 italic mt-2">{filterInfo.description}</p>
                   </div>
@@ -925,6 +995,7 @@ export default function Home() {
                       devices={displayedDevices}
                       title={filterInfo.title}
                       showExport={true}
+                      onToggleRetire={handleToggleRetire}
                     />
                   </div>
                 </div>
@@ -1041,6 +1112,7 @@ export default function Home() {
                       devices={devices.filter(d => d.qualysAgentId && d.vulnerabilityCount && d.vulnerabilityCount > 0).slice(0, 50)}
                       title="Devices with Security Vulnerabilities"
                       showExport={true}
+                      onToggleRetire={handleToggleRetire}
                     />
                   </div>
 

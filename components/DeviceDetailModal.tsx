@@ -1,11 +1,12 @@
 "use client"
 
-import { X, Laptop, User, Calendar, Shield, AlertTriangle, AlertCircle, CheckCircle, Clock, Mail, Building, Cpu, HardDrive, Monitor, Info, ExternalLink } from 'lucide-react'
+import { X, Laptop, User, Calendar, Shield, AlertTriangle, AlertCircle, CheckCircle, Clock, Mail, Building, Cpu, HardDrive, Monitor, Info, ExternalLink, Archive, ArchiveRestore } from 'lucide-react'
 import { Device, Vulnerability } from '@/types/device'
 
 interface DeviceDetailModalProps {
   device: Device
   onClose: () => void
+  onToggleRetire?: (deviceId: string, isRetired: boolean) => void
 }
 
 const STATUS_STYLES = {
@@ -24,7 +25,7 @@ const SEVERITY_STYLES: Record<number, { bg: string; text: string; label: string 
   1: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Info' },
 }
 
-export default function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
+export default function DeviceDetailModal({ device, onClose, onToggleRetire }: DeviceDetailModalProps) {
   const statusStyle = STATUS_STYLES[device.status] || STATUS_STYLES.unknown
   const StatusIcon = statusStyle.icon
 
@@ -49,8 +50,8 @@ export default function DeviceDetailModal({ device, onClose }: DeviceDetailModal
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-8 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[calc(100vh-4rem)] overflow-hidden flex flex-col my-auto">
         {/* Header */}
         <div className={`${statusStyle.bg} ${statusStyle.border} border-b-2 px-6 py-4`}>
           <div className="flex justify-between items-start">
@@ -369,6 +370,32 @@ export default function DeviceDetailModal({ device, onClose }: DeviceDetailModal
             ID: <span className="font-mono text-xs">{device.id}</span>
           </div>
           <div className="flex gap-3">
+            {onToggleRetire && (
+              <button
+                onClick={() => {
+                  onToggleRetire(device.id, !device.isRetired)
+                  onClose()
+                }}
+                className={`px-4 py-2 rounded-lg font-semibold transition-colors flex items-center gap-2
+                         ${device.isRetired
+                           ? 'bg-green-600 text-white hover:bg-green-700'
+                           : 'bg-gray-500 text-white hover:bg-gray-600'
+                         }`}
+                title={device.isRetired ? 'Restore device to active' : 'Mark as retired'}
+              >
+                {device.isRetired ? (
+                  <>
+                    <ArchiveRestore className="w-4 h-4" />
+                    Restore Device
+                  </>
+                ) : (
+                  <>
+                    <Archive className="w-4 h-4" />
+                    Retire Device
+                  </>
+                )}
+              </button>
+            )}
             {device.ownerEmail && (
               <a
                 href={`mailto:${device.ownerEmail}?subject=Regarding device: ${device.name}`}

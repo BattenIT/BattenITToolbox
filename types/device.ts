@@ -69,6 +69,9 @@ export interface Device {
   replacementReason?: string;
   statusReason?: string; // Detailed explanation of why device has this status
   statusReasons?: string[]; // Array of all factors contributing to status
+
+  // Retirement flag - allows marking devices as retired without removing from data
+  isRetired?: boolean;
 }
 
 export interface DeviceSummary {
@@ -84,6 +87,7 @@ export interface DeviceSummary {
   devicesNeedingReplacement: number;
   outOfDateDevices: number;
   vulnerableDevices: number;
+  retiredCount: number;
   // Qualys security metrics
   devicesWithQualysData?: number;
   totalVulnerabilities?: number;

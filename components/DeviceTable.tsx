@@ -1,7 +1,7 @@
 "use client"
 
 import { Device } from '@/types/device'
-import { AlertCircle, AlertTriangle, CheckCircle, Download, Search, ChevronDown, ChevronRight, Eye } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, Download, Search, ChevronDown, ChevronRight, Eye, Archive, ArchiveRestore } from 'lucide-react'
 import { useState } from 'react'
 import DeviceDetailModal from './DeviceDetailModal'
 
@@ -9,12 +9,14 @@ interface DeviceTableProps {
   devices: Device[]
   title?: string
   showExport?: boolean
+  onToggleRetire?: (deviceId: string, isRetired: boolean) => void
 }
 
 export default function DeviceTable({
   devices,
   title = "Devices",
-  showExport = true
+  showExport = true,
+  onToggleRetire
 }: DeviceTableProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [sortField, setSortField] = useState<keyof Device>('ageInYears')
@@ -249,27 +251,30 @@ export default function DeviceTable({
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
                         {getStatusIcon(device.status)}
-                        <span className="font-medium text-uva-navy">{device.name}</span>
+                        <span className={`font-medium ${device.isRetired ? 'text-gray-400' : 'text-uva-navy'}`}>
+                          {device.name}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-sm text-gray-700">
+                    <td className="px-4 py-4 text-sm">
                       <div className="flex flex-col">
-                        <span>{device.owner}</span>
+                        <span className={device.isRetired ? 'text-gray-400' : 'text-gray-700'}>{device.owner}</span>
                         {device.additionalOwner && (
-                          <span className="text-xs text-gray-500 mt-0.5">
+                          <span className={`text-xs mt-0.5 ${device.isRetired ? 'text-gray-400' : 'text-gray-500'}`}>
                             ({device.additionalOwner})
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-sm text-gray-700">
+                    <td className={`px-4 py-4 text-sm ${device.isRetired ? 'text-gray-400' : 'text-gray-700'}`}>
                       {device.model}
                     </td>
-                    <td className="px-4 py-4 text-sm text-gray-700">
+                    <td className={`px-4 py-4 text-sm ${device.isRetired ? 'text-gray-400' : 'text-gray-700'}`}>
                       {device.osType} {device.osVersion}
                     </td>
                     <td className="px-4 py-4">
                       <span className={`text-sm font-semibold ${
+                        device.isRetired ? 'text-gray-400' :
                         device.ageInYears >= 5 ? 'text-red-600' :
                         device.ageInYears >= 3 ? 'text-yellow-600' :
                         'text-green-600'
@@ -278,20 +283,51 @@ export default function DeviceTable({
                       </span>
                     </td>
                     <td className="px-4 py-4">
-                      {getStatusBadge(device.status)}
+                      {device.isRetired ? (
+                        <span className="px-3 py-1 rounded-full text-xs font-semibold border bg-gray-50 text-gray-500 border-gray-300">
+                          Retired
+                        </span>
+                      ) : (
+                        getStatusBadge(device.status)
+                      )}
                     </td>
-                    <td className="px-4 py-4 text-sm text-gray-700">
+                    <td className={`px-4 py-4 text-sm ${device.isRetired ? 'text-gray-400' : 'text-gray-700'}`}>
                       {device.lastSeen.toLocaleDateString()}
                     </td>
                     <td className="px-4 py-4 text-right">
-                      <button
-                        onClick={() => setSelectedDevice(device)}
-                        className="px-3 py-1.5 bg-uva-navy text-white rounded-lg text-xs font-semibold
-                                 hover:bg-uva-navy/90 transition-colors inline-flex items-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        View
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setSelectedDevice(device)}
+                          className="px-3 py-1.5 bg-uva-navy text-white rounded-lg text-xs font-semibold
+                                   hover:bg-uva-navy/90 transition-colors inline-flex items-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          View
+                        </button>
+                        {onToggleRetire && (
+                          <button
+                            onClick={() => onToggleRetire(device.id, !device.isRetired)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1
+                                     ${device.isRetired
+                                       ? 'bg-green-600 text-white hover:bg-green-700'
+                                       : 'bg-gray-500 text-white hover:bg-gray-600'
+                                     }`}
+                            title={device.isRetired ? 'Restore device to active' : 'Mark as retired'}
+                          >
+                            {device.isRetired ? (
+                              <>
+                                <ArchiveRestore className="w-3.5 h-3.5" />
+                                Restore
+                              </>
+                            ) : (
+                              <>
+                                <Archive className="w-3.5 h-3.5" />
+                                Retire
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
 
@@ -487,6 +523,7 @@ export default function DeviceTable({
         <DeviceDetailModal
           device={selectedDevice}
           onClose={() => setSelectedDevice(null)}
+          onToggleRetire={onToggleRetire}
         />
       )}
     </div>

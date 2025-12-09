@@ -305,32 +305,37 @@ export async function loadDeviceData(): Promise<Device[]> {
 
 /**
  * Calculate summary metrics from device list
+ * Retired devices are excluded from most counts but tracked separately
  */
 export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
-  const totalDevices = devices.length
+  // Separate retired and active devices
+  const retiredCount = devices.filter(d => d.isRetired).length
+  const activeDeviceList = devices.filter(d => !d.isRetired)
 
-  const criticalCount = devices.filter(d => d.status === 'critical').length
-  const warningCount = devices.filter(d => d.status === 'warning').length
-  const goodCount = devices.filter(d => d.status === 'good').length
-  const inactiveCount = devices.filter(d => d.status === 'inactive').length
-  const unknownCount = devices.filter(d => d.status === 'unknown').length
+  const totalDevices = activeDeviceList.length
+
+  const criticalCount = activeDeviceList.filter(d => d.status === 'critical').length
+  const warningCount = activeDeviceList.filter(d => d.status === 'warning').length
+  const goodCount = activeDeviceList.filter(d => d.status === 'good').length
+  const inactiveCount = activeDeviceList.filter(d => d.status === 'inactive').length
+  const unknownCount = activeDeviceList.filter(d => d.status === 'unknown').length
 
   // Activity status counts
-  const activeDevices = devices.filter(d => d.activityStatus === 'active').length
-  const inactiveDevices = devices.filter(d => d.activityStatus === 'inactive').length
+  const activeDevices = activeDeviceList.filter(d => d.activityStatus === 'active').length
+  const inactiveDevices = activeDeviceList.filter(d => d.activityStatus === 'inactive').length
 
   // Calculate average age only for devices where we know the age (exclude 0 years)
-  const devicesWithKnownAge = devices.filter(d => d.ageInYears > 0)
+  const devicesWithKnownAge = activeDeviceList.filter(d => d.ageInYears > 0)
   const averageAge = devicesWithKnownAge.length > 0
     ? devicesWithKnownAge.reduce((sum, d) => sum + d.ageInYears, 0) / devicesWithKnownAge.length
     : 0
 
-  const devicesNeedingReplacement = devices.filter(d => d.replacementRecommended).length
-  const outOfDateDevices = devices.filter(d => (d.daysSinceUpdate || 0) > 30).length
-  const vulnerableDevices = devices.filter(d => (d.vulnerabilityCount || 0) > 5).length
+  const devicesNeedingReplacement = activeDeviceList.filter(d => d.replacementRecommended).length
+  const outOfDateDevices = activeDeviceList.filter(d => (d.daysSinceUpdate || 0) > 30).length
+  const vulnerableDevices = activeDeviceList.filter(d => (d.vulnerabilityCount || 0) > 5).length
 
   // Qualys security metrics
-  const devicesWithQualys = devices.filter(d => d.qualysAgentId)
+  const devicesWithQualys = activeDeviceList.filter(d => d.qualysAgentId)
   const devicesWithQualysData = devicesWithQualys.length
   const totalVulnerabilities = devicesWithQualys.reduce((sum, d) => sum + (d.vulnerabilityCount || 0), 0)
   const criticalVulnerabilities = devicesWithQualys.reduce((sum, d) => sum + (d.criticalVulnCount || 0), 0)
@@ -352,6 +357,7 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
     devicesNeedingReplacement,
     outOfDateDevices,
     vulnerableDevices,
+    retiredCount,
     devicesWithQualysData,
     totalVulnerabilities,
     criticalVulnerabilities,
