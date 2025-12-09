@@ -1,12 +1,14 @@
 "use client"
 
-import { X, Laptop, User, Calendar, Shield, AlertTriangle, AlertCircle, CheckCircle, Clock, Mail, Building, Cpu, HardDrive, Monitor, Info, ExternalLink, Archive, ArchiveRestore } from 'lucide-react'
+import { useState } from 'react'
+import { X, Laptop, User, Calendar, Shield, AlertTriangle, AlertCircle, CheckCircle, Clock, Mail, Building, Cpu, HardDrive, Monitor, Info, ExternalLink, Archive, ArchiveRestore, StickyNote, Save, Edit3 } from 'lucide-react'
 import { Device, Vulnerability } from '@/types/device'
 
 interface DeviceDetailModalProps {
   device: Device
   onClose: () => void
   onToggleRetire?: (deviceId: string, isRetired: boolean) => void
+  onUpdateNotes?: (deviceId: string, notes: string) => void
 }
 
 const STATUS_STYLES = {
@@ -25,9 +27,13 @@ const SEVERITY_STYLES: Record<number, { bg: string; text: string; label: string 
   1: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Info' },
 }
 
-export default function DeviceDetailModal({ device, onClose, onToggleRetire }: DeviceDetailModalProps) {
+export default function DeviceDetailModal({ device, onClose, onToggleRetire, onUpdateNotes }: DeviceDetailModalProps) {
   const statusStyle = STATUS_STYLES[device.status] || STATUS_STYLES.unknown
   const StatusIcon = statusStyle.icon
+
+  // Notes editing state
+  const [isEditingNotes, setIsEditingNotes] = useState(false)
+  const [notesValue, setNotesValue] = useState(device.notes || '')
 
   const formatDate = (date: Date | undefined): string => {
     if (!date) return 'N/A'
@@ -351,16 +357,60 @@ export default function DeviceDetailModal({ device, onClose, onToggleRetire }: D
                 </div>
               )}
 
-              {/* Notes */}
-              {device.notes && (
-                <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
-                  <h3 className="font-semibold text-blue-700 flex items-center gap-2 mb-2">
-                    <Info className="w-5 h-5" />
+              {/* Notes - Always shown for editing */}
+              <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-blue-700 flex items-center gap-2">
+                    <StickyNote className="w-5 h-5" />
                     Notes
                   </h3>
-                  <p className="text-sm text-blue-800">{device.notes}</p>
+                  {onUpdateNotes && !isEditingNotes && (
+                    <button
+                      onClick={() => setIsEditingNotes(true)}
+                      className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                      {device.notes ? 'Edit' : 'Add Note'}
+                    </button>
+                  )}
                 </div>
-              )}
+                {isEditingNotes && onUpdateNotes ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={notesValue}
+                      onChange={(e) => setNotesValue(e.target.value)}
+                      placeholder="Add notes about this device..."
+                      className="w-full px-3 py-2 border-2 border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-400 min-h-[80px] resize-y"
+                      autoFocus
+                    />
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => {
+                          setIsEditingNotes(false)
+                          setNotesValue(device.notes || '')
+                        }}
+                        className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          onUpdateNotes(device.id, notesValue)
+                          setIsEditingNotes(false)
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 flex items-center gap-1"
+                      >
+                        <Save className="w-4 h-4" />
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-blue-800">
+                    {device.notes || <span className="text-blue-400 italic">No notes added yet</span>}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>

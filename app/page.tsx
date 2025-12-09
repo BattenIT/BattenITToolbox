@@ -89,6 +89,50 @@ export default function Home() {
     )
   }
 
+  // Load device notes from localStorage
+  const loadDeviceNotes = (): Map<string, string> => {
+    try {
+      const stored = localStorage.getItem('batten-device-notes')
+      if (stored) {
+        return new Map(Object.entries(JSON.parse(stored)))
+      }
+    } catch (error) {
+      console.error('Error loading device notes:', error)
+    }
+    return new Map()
+  }
+
+  // Save device notes to localStorage
+  const saveDeviceNotes = (notes: Map<string, string>) => {
+    try {
+      localStorage.setItem('batten-device-notes', JSON.stringify(Object.fromEntries(notes)))
+    } catch (error) {
+      console.error('Error saving device notes:', error)
+    }
+  }
+
+  // Update device notes
+  const handleUpdateNotes = (deviceId: string, notes: string) => {
+    const deviceNotes = loadDeviceNotes()
+
+    if (notes.trim()) {
+      deviceNotes.set(deviceId, notes.trim())
+    } else {
+      deviceNotes.delete(deviceId)
+    }
+
+    saveDeviceNotes(deviceNotes)
+
+    // Update devices state with new notes
+    setDevices(prevDevices =>
+      prevDevices.map(device =>
+        device.id === deviceId
+          ? { ...device, notes: notes.trim() || undefined }
+          : device
+      )
+    )
+  }
+
   // Load device data on mount
   useEffect(() => {
     loadData()
@@ -373,14 +417,16 @@ export default function Home() {
       setLoading(true)
       const deviceData = await loadDeviceData()
 
-      // Apply retired status from localStorage
+      // Apply retired status and notes from localStorage
       const retiredIds = loadRetiredDeviceIds()
-      const devicesWithRetiredStatus = deviceData.map(device => ({
+      const deviceNotes = loadDeviceNotes()
+      const devicesWithLocalData = deviceData.map(device => ({
         ...device,
-        isRetired: retiredIds.has(device.id)
+        isRetired: retiredIds.has(device.id),
+        notes: deviceNotes.get(device.id) || device.notes
       }))
 
-      setDevices(devicesWithRetiredStatus)
+      setDevices(devicesWithLocalData)
     } catch (error) {
       console.error('Error loading devices:', error)
     } finally {
@@ -996,6 +1042,7 @@ export default function Home() {
                       title={filterInfo.title}
                       showExport={true}
                       onToggleRetire={handleToggleRetire}
+                      onUpdateNotes={handleUpdateNotes}
                     />
                   </div>
                 </div>
@@ -1113,6 +1160,7 @@ export default function Home() {
                       title="Devices with Security Vulnerabilities"
                       showExport={true}
                       onToggleRetire={handleToggleRetire}
+                      onUpdateNotes={handleUpdateNotes}
                     />
                   </div>
 
