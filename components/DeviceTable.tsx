@@ -529,6 +529,7 @@ export default function DeviceTable({
           onClose={() => setSelectedDevice(null)}
           onToggleRetire={onToggleRetire}
           onUpdateNotes={onUpdateNotes}
+          onUpdateOwner={onUpdateOwner}
         />
       )}
     </div>

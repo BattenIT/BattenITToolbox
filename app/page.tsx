@@ -16,7 +16,7 @@ import { MetricCardData } from '@/types/metric'
 import { InventoryItem, InventorySummary, CATEGORY_LABELS, STATUS_LABELS } from '@/types/inventory'
 import { LoanerLaptop, LoanerSummary, LoanHistory, STATUS_LABELS as LOANER_STATUS_LABELS } from '@/types/loaner'
 import { loadDeviceData, calculateDeviceSummary, saveCSVToStorage } from '@/utils/dataLoader'
-import { fetchDeviceSettings, updateRetiredStatus, updateDeviceNotes as apiUpdateNotes } from '@/utils/deviceSettingsApi'
+import { fetchDeviceSettings, updateRetiredStatus, updateDeviceNotes as apiUpdateNotes, updateDeviceOwner as apiUpdateOwner } from '@/utils/deviceSettingsApi'
 import { fetchLoaners, createLoaner, updateLoaner, deleteLoaner as apiDeleteLoaner, addLoanHistoryEntry as apiAddLoanHistory, updateLoanHistoryEntry as apiUpdateLoanHistory } from '@/utils/loanerApi'
 import { logDeviceUpdate, logDeviceRetire, logLoanerAction } from '@/utils/auditApi'
 import CSVUploader from '@/components/CSVUploader'
@@ -90,6 +90,29 @@ export default function Home() {
     // Log audit entry
     if (device) {
       await logDeviceUpdate(deviceId, device.name, 'notes', oldNotes, notes.trim())
+    }
+  }
+
+  // Update device owner - uses API with localStorage fallback
+  const handleUpdateOwner = async (deviceId: string, owner: string) => {
+    const device = devices.find(d => d.id === deviceId)
+    const oldOwner = device?.owner || 'Unassigned'
+
+    // Optimistically update UI
+    setDevices(prevDevices =>
+      prevDevices.map(d =>
+        d.id === deviceId
+          ? { ...d, owner: owner.trim() || 'Unassigned' }
+          : d
+      )
+    )
+
+    // Sync to API (handles localStorage fallback internally)
+    await apiUpdateOwner(deviceId, owner)
+
+    // Log audit entry
+    if (device) {
+      await logDeviceUpdate(deviceId, device.name, 'owner', oldOwner, owner.trim() || 'Unassigned')
     }
   }
 
@@ -1013,6 +1036,7 @@ export default function Home() {
                       showExport={true}
                       onToggleRetire={handleToggleRetire}
                       onUpdateNotes={handleUpdateNotes}
+                      onUpdateOwner={handleUpdateOwner}
                     />
                   </div>
                 </div>
@@ -1131,6 +1155,7 @@ export default function Home() {
                       showExport={true}
                       onToggleRetire={handleToggleRetire}
                       onUpdateNotes={handleUpdateNotes}
+                      onUpdateOwner={handleUpdateOwner}
                     />
                   </div>
 
@@ -1155,6 +1180,7 @@ export default function Home() {
                         showExport={true}
                         onToggleRetire={handleToggleRetire}
                         onUpdateNotes={handleUpdateNotes}
+                      onUpdateOwner={handleUpdateOwner}
                       />
                     </div>
                   )}
