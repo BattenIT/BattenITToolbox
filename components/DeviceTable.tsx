@@ -439,6 +439,38 @@ export default function DeviceTable({
                             </div>
                           </div>
 
+                          {/* Value & Depreciation */}
+                          {device.estimatedMSRP && (
+                            <div className="space-y-3">
+                              <h4 className="font-semibold text-uva-navy text-sm uppercase tracking-wide border-b pb-2">Value & Depreciation</h4>
+                              <div className="space-y-2 text-sm">
+                                <div><span className="font-medium text-gray-700">Original MSRP:</span> <span className="text-gray-600">${device.estimatedMSRP.toLocaleString()}</span></div>
+                                <div><span className="font-medium text-gray-700">Current Value:</span> <span className={`font-semibold ${
+                                  device.currentValue && device.currentValue < 300 ? 'text-red-600' :
+                                  device.currentValue && device.currentValue < 500 ? 'text-yellow-600' :
+                                  'text-green-600'
+                                }`}>${device.currentValue?.toLocaleString() || '0'}</span></div>
+                                <div><span className="font-medium text-gray-700">Depreciation:</span> <span className="text-gray-600">{device.depreciationPercent || 0}%</span></div>
+                                {/* Visual depreciation bar */}
+                                <div className="mt-2">
+                                  <div className="w-full bg-gray-200 rounded-full h-2">
+                                    <div
+                                      className={`h-2 rounded-full ${
+                                        (device.depreciationPercent || 0) >= 80 ? 'bg-red-500' :
+                                        (device.depreciationPercent || 0) >= 50 ? 'bg-yellow-500' :
+                                        'bg-green-500'
+                                      }`}
+                                      style={{ width: `${100 - (device.depreciationPercent || 0)}%` }}
+                                    ></div>
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {100 - (device.depreciationPercent || 0)}% of original value remaining
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Status Reasons - Full Width */}
                           {device.statusReasons && device.statusReasons.length > 0 && (
                             <div className="col-span-1 md:col-span-2 lg:col-span-3 space-y-3">

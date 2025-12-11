@@ -6,7 +6,7 @@
 import { Device, DeviceStatus, OSType, Vulnerability, ActivityStatus } from '@/types/device'
 import { IntuneRawData, JamfRawData, BattenUserData, QualysAssetData, QualysVulnData, EntraDeviceData, AxoniusDeviceData, parseDate, yearsBetween, daysBetween } from './csvParser'
 import { extractComputingIdsFromDeviceName } from './dataLoader'
-import { lookupModelName, getManufacturerFromModel, calculateAgeFromModel, getModelReleaseYear } from './modelLookup'
+import { lookupModelName, getManufacturerFromModel, calculateAgeFromModel, getModelReleaseYear, getDeviceValue } from './modelLookup'
 
 /**
  * IT staff who provision devices (should not be primary owners)
@@ -1131,6 +1131,9 @@ export function transformAxoniusData(axoniusData: AxoniusDeviceData[], usersMap?
     const adapterConnections = (raw['Aggregated: Adapter Connections'] || '').split('\n').map(a => a.trim()).filter(a => a)
     const sourceNote = `Data sources: ${adapterConnections.slice(0, 5).join(', ')}${adapterConnections.length > 5 ? ` +${adapterConnections.length - 5} more` : ''}`
 
+    // Calculate device value
+    const deviceValue = getDeviceValue(rawModel, model)
+
     const device: Device = {
       id: `axonius-${hostname}`,
       name: hostname,
@@ -1159,6 +1162,10 @@ export function transformAxoniusData(axoniusData: AxoniusDeviceData[], usersMap?
       replacementReason,
       statusReasons,
       notes: sourceNote,
+      // Value & Depreciation
+      estimatedMSRP: deviceValue.msrp,
+      currentValue: deviceValue.currentValue,
+      depreciationPercent: deviceValue.depreciationPercent,
     }
 
     devices.push(device)

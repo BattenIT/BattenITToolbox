@@ -5,406 +5,38 @@ import Header from '@/components/Header'
 import Footer from '@/components/Footer'
 import MetricCard from '@/components/MetricCard'
 import DeviceTable from '@/components/DeviceTable'
-import InventoryTable from '@/components/InventoryTable'
-import InventoryForm from '@/components/InventoryForm'
-import LoanerTable from '@/components/LoanerTable'
-import LoanerForm from '@/components/LoanerForm'
-import { AlertCircle, AlertTriangle, CheckCircle, Laptop, Shield, Clock, Database, Search, User, DollarSign, TrendingUp, Upload, BarChart3, Settings, Package, Plus, MonitorSmartphone } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, Laptop, Shield, Clock, Database, Search, User, DollarSign, TrendingUp, Upload, BarChart3, Settings } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Device } from '@/types/device'
 import { MetricCardData } from '@/types/metric'
-import { InventoryItem, InventorySummary, CATEGORY_LABELS, STATUS_LABELS } from '@/types/inventory'
-import { LoanerLaptop, LoanerSummary, LoanHistory, STATUS_LABELS as LOANER_STATUS_LABELS } from '@/types/loaner'
 import { loadDeviceData, calculateDeviceSummary, saveCSVToStorage } from '@/utils/dataLoader'
-import { fetchDeviceSettings, updateRetiredStatus, updateDeviceNotes as apiUpdateNotes, updateDeviceOwner as apiUpdateOwner } from '@/utils/deviceSettingsApi'
-import { fetchLoaners, createLoaner, updateLoaner, deleteLoaner as apiDeleteLoaner, addLoanHistoryEntry as apiAddLoanHistory, updateLoanHistoryEntry as apiUpdateLoanHistory } from '@/utils/loanerApi'
-import { logDeviceUpdate, logDeviceRetire, logLoanerAction } from '@/utils/auditApi'
 import CSVUploader from '@/components/CSVUploader'
 
-type FilterView = 'attention' | 'all' | 'critical' | 'warning' | 'good' | 'inactive' | 'active' | 'jamf' | 'intune' | 'replacement' | 'retired' | 'no-qualys'
-type TabView = 'overview' | 'devices' | 'security' | 'inventory' | 'loaners' | 'tools'
+type FilterView = 'attention' | 'all' | 'critical' | 'warning' | 'good' | 'inactive' | 'active' | 'jamf' | 'intune' | 'replacement'
+type TabView = 'overview' | 'devices' | 'security' | 'loaners' | 'tools'
 
 export default function Home() {
   const router = useRouter()
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<TabView>('overview')
-  const [filterView, setFilterView] = useState<FilterView>('all')
+  const [filterView, setFilterView] = useState<FilterView>('attention')
   const [searchTerm, setSearchTerm] = useState('')
   const [userLookup, setUserLookup] = useState('')
   const [showBudgetTool, setShowBudgetTool] = useState(false)
   const [showCSVUploader, setShowCSVUploader] = useState(false)
   const [devicesPerPage, setDevicesPerPage] = useState<number>(25)
 
-  // Inventory state
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
-  const [showInventoryForm, setShowInventoryForm] = useState(false)
-  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
-
-  // Loaner state
-  const [loanerLaptops, setLoanerLaptops] = useState<LoanerLaptop[]>([])
-  const [loanHistory, setLoanHistory] = useState<LoanHistory[]>([])
-  const [showLoanerForm, setShowLoanerForm] = useState(false)
-  const [editingLoaner, setEditingLoaner] = useState<LoanerLaptop | null>(null)
-  const [loanerFormMode, setLoanerFormMode] = useState<'add' | 'edit' | 'checkout' | 'return'>('add')
-
-  // Toggle device retired status - uses API with localStorage fallback
-  const handleToggleRetire = async (deviceId: string, isRetired: boolean) => {
-    const device = devices.find(d => d.id === deviceId)
-
-    // Optimistically update UI
-    setDevices(prevDevices =>
-      prevDevices.map(d =>
-        d.id === deviceId
-          ? { ...d, isRetired }
-          : d
-      )
-    )
-
-    // Sync to API (handles localStorage fallback internally)
-    await updateRetiredStatus(deviceId, isRetired)
-
-    // Log audit entry
-    if (device) {
-      await logDeviceRetire(deviceId, device.name, isRetired)
-    }
-  }
-
-  // Update device notes - uses API with localStorage fallback
-  const handleUpdateNotes = async (deviceId: string, notes: string) => {
-    const device = devices.find(d => d.id === deviceId)
-    const oldNotes = device?.notes || ''
-
-    // Optimistically update UI
-    setDevices(prevDevices =>
-      prevDevices.map(d =>
-        d.id === deviceId
-          ? { ...d, notes: notes.trim() || undefined }
-          : d
-      )
-    )
-
-    // Sync to API (handles localStorage fallback internally)
-    await apiUpdateNotes(deviceId, notes)
-
-    // Log audit entry
-    if (device) {
-      await logDeviceUpdate(deviceId, device.name, 'notes', oldNotes, notes.trim())
-    }
-  }
-
-  // Update device owner - uses API with localStorage fallback
-  const handleUpdateOwner = async (deviceId: string, owner: string) => {
-    const device = devices.find(d => d.id === deviceId)
-    const oldOwner = device?.owner || 'Unassigned'
-
-    // Optimistically update UI
-    setDevices(prevDevices =>
-      prevDevices.map(d =>
-        d.id === deviceId
-          ? { ...d, owner: owner.trim() || 'Unassigned' }
-          : d
-      )
-    )
-
-    // Sync to API (handles localStorage fallback internally)
-    await apiUpdateOwner(deviceId, owner)
-
-    // Log audit entry
-    if (device) {
-      await logDeviceUpdate(deviceId, device.name, 'owner', oldOwner, owner.trim() || 'Unassigned')
-    }
-  }
-
   // Load device data on mount
   useEffect(() => {
     loadData()
-    loadInventory()
-    loadLoaners()
   }, [])
-
-  // Load inventory from localStorage
-  const loadInventory = () => {
-    try {
-      const stored = localStorage.getItem('batten-inventory')
-      if (stored) {
-        const items = JSON.parse(stored).map((item: InventoryItem) => ({
-          ...item,
-          purchaseDate: item.purchaseDate ? new Date(item.purchaseDate) : undefined,
-          warrantyExpiration: item.warrantyExpiration ? new Date(item.warrantyExpiration) : undefined,
-          createdAt: new Date(item.createdAt),
-          updatedAt: new Date(item.updatedAt),
-        }))
-        setInventoryItems(items)
-      }
-    } catch (error) {
-      console.error('Error loading inventory:', error)
-    }
-  }
-
-  // Save inventory to localStorage
-  const saveInventory = (items: InventoryItem[]) => {
-    try {
-      localStorage.setItem('batten-inventory', JSON.stringify(items))
-    } catch (error) {
-      console.error('Error saving inventory:', error)
-    }
-  }
-
-  // Handle inventory item save (add or edit)
-  const handleInventorySave = (itemData: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
-    const now = new Date()
-
-    if (itemData.id) {
-      // Edit existing item
-      const updatedItems = inventoryItems.map(item =>
-        item.id === itemData.id
-          ? { ...item, ...itemData, updatedAt: now }
-          : item
-      )
-      setInventoryItems(updatedItems)
-      saveInventory(updatedItems)
-    } else {
-      // Add new item
-      const newItem: InventoryItem = {
-        ...itemData,
-        id: `inv-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        createdAt: now,
-        updatedAt: now,
-      } as InventoryItem
-      const updatedItems = [...inventoryItems, newItem]
-      setInventoryItems(updatedItems)
-      saveInventory(updatedItems)
-    }
-
-    setShowInventoryForm(false)
-    setEditingItem(null)
-  }
-
-  // Handle inventory item delete
-  const handleInventoryDelete = (id: string) => {
-    if (confirm('Are you sure you want to delete this item?')) {
-      const updatedItems = inventoryItems.filter(item => item.id !== id)
-      setInventoryItems(updatedItems)
-      saveInventory(updatedItems)
-    }
-  }
-
-  // Handle inventory item edit
-  const handleInventoryEdit = (item: InventoryItem) => {
-    setEditingItem(item)
-    setShowInventoryForm(true)
-  }
-
-  // Load loaners from API with localStorage fallback
-  const loadLoaners = async () => {
-    try {
-      const data = await fetchLoaners()
-      setLoanerLaptops(data.loaners)
-      setLoanHistory(data.loanHistory)
-    } catch (error) {
-      console.error('Error loading loaners:', error)
-    }
-  }
-
-  // Handle loaner save (add, edit, checkout, return) - syncs to API
-  const handleLoanerSave = async (loanerData: Omit<LoanerLaptop, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
-    const now = new Date()
-    const existingLoaner = loanerData.id ? loanerLaptops.find(l => l.id === loanerData.id) : null
-
-    if (loanerData.id) {
-      // Edit existing loaner
-      const updatedLoaner: LoanerLaptop = {
-        ...existingLoaner!,
-        ...loanerData,
-        id: loanerData.id,
-        updatedAt: now,
-      } as LoanerLaptop
-
-      // Optimistically update UI
-      const updatedLoaners = loanerLaptops.map(loaner =>
-        loaner.id === loanerData.id ? updatedLoaner : loaner
-      )
-      setLoanerLaptops(updatedLoaners)
-
-      // Sync to API
-      await updateLoaner(updatedLoaner)
-
-      // Track checkout: if status changed from available to checked-out
-      if (existingLoaner && existingLoaner.status === 'available' && loanerData.status === 'checked-out') {
-        const historyEntry: LoanHistory = {
-          id: `history-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          loanerId: loanerData.id,
-          borrowerName: loanerData.borrowerName || 'Unknown',
-          borrowerEmail: loanerData.borrowerEmail,
-          borrowerDepartment: loanerData.borrowerDepartment,
-          checkoutDate: loanerData.checkoutDate || now,
-          expectedReturnDate: loanerData.expectedReturnDate,
-          notes: loanerData.notes,
-        }
-        setLoanHistory(prev => [...prev, historyEntry])
-        await apiAddLoanHistory(historyEntry)
-
-        // Log audit entry for checkout
-        await logLoanerAction(
-          loanerData.id,
-          loanerData.name,
-          'checkout',
-          `Checked out to ${loanerData.borrowerName}`
-        )
-      }
-
-      // Track return: if status changed from checked-out to available
-      if (existingLoaner && existingLoaner.status === 'checked-out' && loanerData.status === 'available') {
-        // Find the active history entry and update it
-        const activeEntry = loanHistory.find(h => h.loanerId === loanerData.id && !h.actualReturnDate)
-        if (activeEntry) {
-          const updatedHistory = loanHistory.map(entry =>
-            entry.id === activeEntry.id
-              ? { ...entry, actualReturnDate: loanerData.actualReturnDate || now, notes: loanerData.notes || entry.notes }
-              : entry
-          )
-          setLoanHistory(updatedHistory)
-          await apiUpdateLoanHistory(activeEntry.id, {
-            actualReturnDate: loanerData.actualReturnDate || now,
-            notes: loanerData.notes || activeEntry.notes
-          })
-        }
-
-        // Log audit entry for return
-        await logLoanerAction(
-          loanerData.id,
-          loanerData.name,
-          'return',
-          `Returned by ${existingLoaner.borrowerName}`
-        )
-      }
-
-      // Log general update if not a checkout/return
-      if (existingLoaner && existingLoaner.status === loanerData.status) {
-        await logLoanerAction(
-          loanerData.id,
-          loanerData.name,
-          'update',
-          'Loaner details updated'
-        )
-      }
-    } else {
-      // Add new loaner
-      const newLoaner: LoanerLaptop = {
-        ...loanerData,
-        id: `loaner-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        createdAt: now,
-        updatedAt: now,
-      } as LoanerLaptop
-
-      // Optimistically update UI
-      setLoanerLaptops(prev => [...prev, newLoaner])
-
-      // Sync to API
-      await createLoaner(newLoaner)
-
-      // Log audit entry for creation
-      await logLoanerAction(newLoaner.id, newLoaner.name, 'create', 'New loaner laptop added')
-    }
-
-    setShowLoanerForm(false)
-    setEditingLoaner(null)
-    setLoanerFormMode('add')
-  }
-
-  // Handle loaner delete - syncs to API
-  const handleLoanerDelete = async (id: string) => {
-    const loaner = loanerLaptops.find(l => l.id === id)
-
-    if (confirm('Are you sure you want to delete this loaner laptop?')) {
-      // Optimistically update UI
-      setLoanerLaptops(prev => prev.filter(l => l.id !== id))
-      setLoanHistory(prev => prev.filter(h => h.loanerId !== id))
-
-      // Sync to API
-      await apiDeleteLoaner(id)
-
-      // Log audit entry
-      if (loaner) {
-        await logLoanerAction(id, loaner.name, 'delete', 'Loaner laptop deleted')
-      }
-    }
-  }
-
-  // Handle loaner edit
-  const handleLoanerEdit = (loaner: LoanerLaptop) => {
-    setEditingLoaner(loaner)
-    setLoanerFormMode('edit')
-    setShowLoanerForm(true)
-  }
-
-  // Handle loaner checkout
-  const handleLoanerCheckout = (loaner: LoanerLaptop) => {
-    setEditingLoaner(loaner)
-    setLoanerFormMode('checkout')
-    setShowLoanerForm(true)
-  }
-
-  // Handle loaner return
-  const handleLoanerReturn = (loaner: LoanerLaptop) => {
-    setEditingLoaner(loaner)
-    setLoanerFormMode('return')
-    setShowLoanerForm(true)
-  }
-
-  // Calculate loaner summary
-  const loanerSummary: LoanerSummary = {
-    totalLoaners: loanerLaptops.length,
-    available: loanerLaptops.filter(l => l.status === 'available').length,
-    checkedOut: loanerLaptops.filter(l => l.status === 'checked-out').length,
-    inMaintenance: loanerLaptops.filter(l => l.status === 'maintenance').length,
-    retired: loanerLaptops.filter(l => l.status === 'retired').length,
-    overdueCount: loanerLaptops.filter(l => {
-      if (l.status !== 'checked-out' || !l.expectedReturnDate) return false
-      return new Date(l.expectedReturnDate) < new Date()
-    }).length,
-  }
-
-  // Calculate inventory summary
-  const inventorySummary: InventorySummary = {
-    totalItems: inventoryItems.length,
-    totalValue: inventoryItems.reduce((sum, item) => sum + (item.purchasePrice || 0), 0),
-    byCategory: inventoryItems.reduce((acc, item) => {
-      acc[item.category] = (acc[item.category] || 0) + 1
-      return acc
-    }, {} as Record<string, number>) as InventorySummary['byCategory'],
-    byStatus: inventoryItems.reduce((acc, item) => {
-      acc[item.status] = (acc[item.status] || 0) + 1
-      return acc
-    }, {} as Record<string, number>) as InventorySummary['byStatus'],
-    warrantyExpiringSoon: inventoryItems.filter(item => {
-      if (!item.warrantyExpiration) return false
-      const daysUntilExpiry = (new Date(item.warrantyExpiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-      return daysUntilExpiry > 0 && daysUntilExpiry <= 90
-    }).length,
-    recentlyAdded: inventoryItems.filter(item => {
-      const daysSinceAdded = (Date.now() - new Date(item.createdAt).getTime()) / (1000 * 60 * 60 * 24)
-      return daysSinceAdded <= 30
-    }).length,
-  }
 
   const loadData = async () => {
     try {
       setLoading(true)
       const deviceData = await loadDeviceData()
-
-      // Fetch device settings from API (with localStorage fallback)
-      const settings = await fetchDeviceSettings()
-      const retiredSet = new Set(settings.retiredDevices)
-
-      const devicesWithSettings = deviceData.map(device => ({
-        ...device,
-        isRetired: retiredSet.has(device.id),
-        notes: settings.deviceNotes[device.id] || device.notes
-      }))
-
-      setDevices(devicesWithSettings)
+      setDevices(deviceData)
     } catch (error) {
       console.error('Error loading devices:', error)
     } finally {
@@ -433,42 +65,35 @@ export default function Home() {
     // Apply status/source filters
     switch (filterView) {
       case 'critical':
-        filtered = devices.filter(d => d.status === 'critical' && !d.isRetired)
+        filtered = devices.filter(d => d.status === 'critical')
         break
       case 'warning':
-        filtered = devices.filter(d => d.status === 'warning' && !d.isRetired)
+        filtered = devices.filter(d => d.status === 'warning')
         break
       case 'good':
-        filtered = devices.filter(d => d.status === 'good' && !d.isRetired)
+        filtered = devices.filter(d => d.status === 'good')
         break
       case 'inactive':
-        filtered = devices.filter(d => d.status === 'inactive' && !d.isRetired)
+        filtered = devices.filter(d => d.status === 'inactive')
         break
       case 'active':
-        filtered = devices.filter(d => d.activityStatus === 'active' && !d.isRetired)
+        filtered = devices.filter(d => d.activityStatus === 'active')
         break
       case 'jamf':
-        filtered = devices.filter(d => d.source === 'jamf' && !d.isRetired)
+        filtered = devices.filter(d => d.source === 'jamf')
         break
       case 'intune':
-        filtered = devices.filter(d => d.source === 'intune' && !d.isRetired)
+        filtered = devices.filter(d => d.source === 'intune')
         break
       case 'replacement':
-        filtered = devices.filter(d => d.replacementRecommended && !d.isRetired)
+        filtered = devices.filter(d => d.replacementRecommended)
         break
       case 'attention':
-        filtered = devices.filter(d => !d.isRetired && (d.status === 'critical' || d.status === 'warning' || d.replacementRecommended))
-        break
-      case 'retired':
-        filtered = devices.filter(d => d.isRetired)
-        break
-      case 'no-qualys':
-        filtered = devices.filter(d => !d.qualysAgentId && !d.isRetired)
+        filtered = devices.filter(d => d.status === 'critical' || d.status === 'warning' || d.replacementRecommended)
         break
       case 'all':
       default:
-        // Show all non-retired by default, unless explicitly searching
-        filtered = devices.filter(d => !d.isRetired)
+        // No filter
         break
     }
 
@@ -522,10 +147,6 @@ export default function Home() {
         return { title: 'Intune Devices', description: 'Devices managed by Microsoft Intune' }
       case 'replacement':
         return { title: 'Replacement Needed', description: 'Devices flagged for replacement' }
-      case 'retired':
-        return { title: 'Retired Devices', description: 'Devices marked as retired (excluded from counts)' }
-      case 'no-qualys':
-        return { title: 'Missing Qualys Agent', description: 'Devices without Qualys security agent installed' }
       case 'attention':
       default:
         return { title: 'Devices Needing Attention', description: 'Critical, warning, or replacement recommended' }
@@ -533,12 +154,6 @@ export default function Home() {
   }
 
   const filterInfo = getFilterInfo()
-
-  // Helper to navigate to devices tab with a filter
-  const goToDevices = (filter: FilterView) => {
-    setFilterView(filter)
-    setActiveTab('devices')
-  }
 
   // Primary metric cards
   const metricCards: MetricCardData[] = [
@@ -550,7 +165,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-red-200',
       iconGradient: 'from-red-500 to-red-600',
-      onClick: () => goToDevices('critical'),
     },
     {
       label: 'Warning Devices',
@@ -560,7 +174,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-yellow-200',
       iconGradient: 'from-yellow-500 to-yellow-600',
-      onClick: () => goToDevices('warning'),
     },
     {
       label: 'Good Devices',
@@ -570,7 +183,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-green-200',
       iconGradient: 'from-green-500 to-green-600',
-      onClick: () => goToDevices('good'),
     },
     {
       label: 'Total Devices',
@@ -580,7 +192,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-gray-200',
       iconGradient: 'from-gray-500 to-gray-600',
-      onClick: () => goToDevices('all'),
     },
   ]
 
@@ -594,7 +205,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-blue-200',
       iconGradient: 'from-blue-500 to-blue-600',
-      onClick: () => goToDevices('active'),
     },
     {
       label: 'Replacement Needed',
@@ -604,7 +214,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-red-200',
       iconGradient: 'from-red-500 to-red-600',
-      onClick: () => goToDevices('replacement'),
     },
     {
       label: 'Out of Date',
@@ -614,7 +223,6 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-orange-200',
       iconGradient: 'from-orange-500 to-orange-600',
-      onClick: () => goToDevices('attention'),
     },
     {
       label: 'Data Sources',
@@ -624,6 +232,15 @@ export default function Home() {
       bgColor: 'bg-white',
       borderColor: 'border-blue-200',
       iconGradient: 'from-blue-500 to-blue-600',
+    },
+    {
+      label: 'Fleet Value',
+      value: summary.totalCurrentValue ? `$${(summary.totalCurrentValue / 1000).toFixed(0)}k` : 'N/A',
+      subtext: summary.totalMSRP ? `MSRP: $${(summary.totalMSRP / 1000).toFixed(0)}k` : 'Calculating...',
+      icon: DollarSign,
+      bgColor: 'bg-white',
+      borderColor: 'border-green-200',
+      iconGradient: 'from-green-500 to-green-600',
     },
   ]
 
@@ -673,7 +290,7 @@ export default function Home() {
 
       <main className="flex-1">
         {/* Main Content */}
-        <section className="max-w-[2400px] mx-auto px-4 sm:px-6 lg:px-12 xl:px-16 py-8">
+        <section className="max-w-[1920px] mx-auto px-8 py-12 pt-8">
           {loading ? (
             <div className="flex items-center justify-center h-96">
               <div className="text-center">
@@ -693,104 +310,111 @@ export default function Home() {
             </div>
           ) : (
             <>
-              {/* Tab Navigation - Folder Style */}
-              <div className="mb-6">
-                <div className="flex gap-1 overflow-x-auto pb-0">
+              {/* Tab Navigation - Filing Cabinet Style */}
+              <div className="flex justify-center gap-1 mb-0 relative z-10">
+                <button
+                  onClick={() => setActiveTab('overview')}
+                  className={`flex-1 max-w-[200px] px-6 py-4 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-3 border-b-0 text-white ${
+                    activeTab === 'overview'
+                      ? 'bg-uva-navy border-uva-navy shadow-lg relative z-20 -mb-1'
+                      : 'bg-uva-navy/75 border-uva-navy/75 hover:brightness-110'
+                  }`}
+                  style={{ marginBottom: activeTab === 'overview' ? '-3px' : '0' }}
+                >
+                  Overview
+                </button>
+                <button
+                  onClick={() => setActiveTab('devices')}
+                  className={`flex-1 max-w-[200px] px-6 py-4 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-3 border-b-0 text-white ${
+                    activeTab === 'devices'
+                      ? 'bg-uva-orange border-uva-orange shadow-lg relative z-20 -mb-1'
+                      : 'bg-uva-orange/75 border-uva-orange/75 hover:brightness-110'
+                  }`}
+                  style={{ marginBottom: activeTab === 'devices' ? '-3px' : '0' }}
+                >
+                  All Devices
+                </button>
+                {securityMetrics.length > 0 && (
                   <button
-                    onClick={() => setActiveTab('overview')}
-                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
-                      activeTab === 'overview'
-                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
-                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
+                    onClick={() => setActiveTab('security')}
+                    className={`flex-1 max-w-[200px] px-6 py-4 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-3 border-b-0 text-white ${
+                      activeTab === 'security'
+                        ? 'bg-red-600 border-red-600 shadow-lg relative z-20 -mb-1'
+                        : 'bg-red-600/75 border-red-600/75 hover:brightness-110'
                     }`}
-                    style={activeTab === 'overview' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
+                    style={{ marginBottom: activeTab === 'security' ? '-3px' : '0' }}
                   >
-                    Overview
+                    Security
                   </button>
-                  <button
-                    onClick={() => setActiveTab('devices')}
-                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
-                      activeTab === 'devices'
-                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
-                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
-                    }`}
-                    style={activeTab === 'devices' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
-                  >
-                    All Devices
-                  </button>
-                  {securityMetrics.length > 0 && (
-                    <button
-                      onClick={() => setActiveTab('security')}
-                      className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
-                        activeTab === 'security'
-                          ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
-                          : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
-                      }`}
-                      style={activeTab === 'security' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
-                    >
-                      Security
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setActiveTab('inventory')}
-                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative flex items-center gap-2 ${
-                      activeTab === 'inventory'
-                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
-                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
-                    }`}
-                    style={activeTab === 'inventory' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
-                  >
-                    Inventory
-                    {inventoryItems.length > 0 && (
-                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">
-                        {inventoryItems.length}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('loaners')}
-                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative flex items-center gap-2 ${
-                      activeTab === 'loaners'
-                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
-                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
-                    }`}
-                    style={activeTab === 'loaners' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
-                  >
-                    Loaner Laptops
-                    {loanerLaptops.length > 0 && (
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                        loanerSummary.overdueCount > 0
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-cyan-100 text-cyan-700'
-                      }`}>
-                        {loanerLaptops.length}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('tools')}
-                    className={`px-8 py-3 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-2 border-b-0 relative ${
-                      activeTab === 'tools'
-                        ? 'bg-white text-uva-orange border-gray-300 shadow-sm z-10 -mb-[2px]'
-                        : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-uva-navy'
-                    }`}
-                    style={activeTab === 'tools' ? { paddingBottom: 'calc(0.75rem + 2px)' } : {}}
-                  >
-                    Tools & Settings
-                  </button>
-                </div>
-                <div className="border-t-2 border-gray-300"></div>
+                )}
+                <button
+                  onClick={() => setActiveTab('loaners')}
+                  className={`flex-1 max-w-[200px] px-6 py-4 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-3 border-b-0 text-white ${
+                    activeTab === 'loaners'
+                      ? 'bg-emerald-600 border-emerald-600 shadow-lg relative z-20 -mb-1'
+                      : 'bg-emerald-600/75 border-emerald-600/75 hover:brightness-110'
+                  }`}
+                  style={{ marginBottom: activeTab === 'loaners' ? '-3px' : '0' }}
+                >
+                  Loaners
+                </button>
+                <button
+                  onClick={() => setActiveTab('tools')}
+                  className={`flex-1 max-w-[200px] px-6 py-4 font-semibold text-sm transition-all whitespace-nowrap rounded-t-xl border-3 border-b-0 text-white ${
+                    activeTab === 'tools'
+                      ? 'bg-purple-600 border-purple-600 shadow-lg relative z-20 -mb-1'
+                      : 'bg-purple-600/75 border-purple-600/75 hover:brightness-110'
+                  }`}
+                  style={{ marginBottom: activeTab === 'tools' ? '-3px' : '0' }}
+                >
+                  Tools & Settings
+                </button>
               </div>
+
+              {/* Tab Content Panel */}
+              <div className={`bg-white rounded-b-xl rounded-tr-xl shadow-lg border-3 p-6 relative z-5 ${
+                activeTab === 'overview' ? 'border-uva-navy' :
+                activeTab === 'devices' ? 'border-uva-orange' :
+                activeTab === 'security' ? 'border-red-600' :
+                activeTab === 'loaners' ? 'border-emerald-600' :
+                'border-purple-600'
+              }`}>
 
               {/* OVERVIEW TAB */}
               {activeTab === 'overview' && (
                 <div className="animate-fade-in">
                   {/* Primary Metrics */}
-                  <div className="mb-8">
-                    <h2 className="text-xl font-serif font-bold text-uva-navy mb-4">
-                      Device Health
+                  <div className="mb-12">
+                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
+                      Device Health Overview
                     </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+                    {/* Explanation Section */}
+                    <div className="bg-blue-50 border-l-4 border-blue-500 p-6 mb-6 rounded-r-lg">
+                      <h3 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5" />
+                        How Device Health is Calculated
+                      </h3>
+                      <div className="text-sm text-blue-800 space-y-2">
+                        <p>
+                          <strong>Critical Devices:</strong> Devices that are 7+ years old OR have failed OS compliance checks.
+                          These devices require immediate replacement due to age, security vulnerabilities, or inability to run current software.
+                        </p>
+                        <p>
+                          <strong>Warning Devices:</strong> Devices that are 5-7 years old. These are approaching end-of-life and should
+                          be planned for replacement within the next fiscal year.
+                        </p>
+                        <p>
+                          <strong>Good Devices:</strong> Devices less than 5 years old that are functioning normally and meet security requirements.
+                        </p>
+                        <p>
+                          <strong>Age Calculation:</strong> Device age is calculated from the purchase date (if available) or enrollment date.
+                          Average fleet age helps identify when bulk replacements may be needed.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                       {metricCards.map((card, index) => (
                         <MetricCard
                           key={card.label}
@@ -802,11 +426,38 @@ export default function Home() {
                   </div>
 
                   {/* Secondary Metrics */}
-                  <div className="mb-8">
-                    <h2 className="text-xl font-serif font-bold text-uva-navy mb-4">
-                      Activity & Updates
+                  <div className="mb-12">
+                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
+                      Additional Insights
                     </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+                    {/* Explanation Section */}
+                    <div className="bg-green-50 border-l-4 border-green-500 p-6 mb-6 rounded-r-lg">
+                      <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
+                        <Clock className="w-5 h-5" />
+                        Understanding Activity & Update Metrics
+                      </h3>
+                      <div className="text-sm text-green-800 space-y-2">
+                        <p>
+                          <strong>Active Devices:</strong> Devices that have checked in with Jamf or Intune within the last 30 days.
+                          Inactive devices may be lost, stolen, in storage, or retired without being properly deprovisioned.
+                        </p>
+                        <p>
+                          <strong>Replacement Needed:</strong> Count of devices flagged for replacement based on age, compliance failures,
+                          or hardware issues. The estimated cost assumes $1,500 per device replacement.
+                        </p>
+                        <p>
+                          <strong>Out of Date:</strong> Devices that haven't received OS updates in 60+ days. These devices may have
+                          security vulnerabilities and should be investigated for update failures or user-deferred updates.
+                        </p>
+                        <p>
+                          <strong>Data Sources:</strong> This dashboard aggregates data from Jamf Pro (macOS devices), Microsoft Intune
+                          (Windows devices), Qualys (vulnerabilities), and UVA user directory.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                       {additionalMetrics.map((card, index) => (
                         <MetricCard
                           key={card.label}
@@ -819,14 +470,43 @@ export default function Home() {
 
                   {/* Security Metrics (Qualys) */}
                   {securityMetrics.length > 0 && (
-                    <div className="mb-8">
-                      <div className="flex items-center gap-2 mb-4">
-                        <Shield className="w-6 h-6 text-red-600" />
-                        <h2 className="text-xl font-serif font-bold text-uva-navy">
-                          Security
+                    <div className="mb-12">
+                      <div className="flex items-center gap-3 mb-6">
+                        <Shield className="w-7 h-7 text-red-600" />
+                        <h2 className="text-2xl font-serif font-bold text-uva-navy">
+                          Security & Vulnerability Insights
                         </h2>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+                      {/* Explanation Section */}
+                      <div className="bg-red-50 border-l-4 border-red-500 p-6 mb-6 rounded-r-lg">
+                        <h3 className="font-semibold text-red-900 mb-3 flex items-center gap-2">
+                          <Shield className="w-5 h-5" />
+                          Understanding Qualys Security Metrics
+                        </h3>
+                        <div className="text-sm text-red-800 space-y-2">
+                          <p>
+                            <strong>Qualys Coverage:</strong> Number of devices with active Qualys agents performing security scans.
+                            Devices are matched to Qualys data by hostname, NetBIOS name, or user computing ID. Not all devices may have
+                            Qualys agents installed, especially personal or newly provisioned devices.
+                          </p>
+                          <p>
+                            <strong>Vulnerabilities:</strong> Total count of all security vulnerabilities detected across the fleet,
+                            including software outdated versions, missing patches, and configuration issues identified by Qualys scans.
+                          </p>
+                          <p>
+                            <strong>Critical Vulnerabilities:</strong> High-priority vulnerabilities (severity 4-5) that pose immediate
+                            security risks and should be remediated urgently. These often include remotely exploitable flaws and zero-day vulnerabilities.
+                          </p>
+                          <p>
+                            <strong>TruRisk Score:</strong> Qualys' proprietary risk scoring (0-1000) that combines vulnerability severity,
+                            asset criticality, and threat intelligence. Higher scores indicate greater risk exposure. The average helps
+                            prioritize remediation efforts across the fleet.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                         {securityMetrics.map((card, index) => (
                           <MetricCard
                             key={card.label}
@@ -839,43 +519,38 @@ export default function Home() {
                   )}
 
                   {/* Quick Actions */}
-                  <div className="mb-8">
-                    <h2 className="text-xl font-serif font-bold text-uva-navy mb-4">
+                  <div className="mb-12">
+                    <h2 className="text-2xl font-serif font-bold text-uva-navy mb-6">
                       Quick Actions
                     </h2>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <button
                         onClick={() => setActiveTab('devices')}
-                        className="bg-white rounded-xl shadow-lg border-2 border-blue-200 p-4 hover:shadow-xl hover:-translate-y-1 transition-all text-left"
+                        className="bg-white rounded-xl shadow-2xl border-4 border-blue-200 p-8 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:-translate-y-2 transition-all text-left"
                       >
-                        <Laptop className="w-8 h-8 text-blue-600 mb-2" />
-                        <h3 className="text-sm font-bold text-uva-navy">All Devices</h3>
+                        <Laptop className="w-12 h-12 text-blue-600 mb-4" />
+                        <h3 className="text-xl font-bold text-uva-navy mb-2">View All Devices</h3>
+                        <p className="text-gray-600">Browse and search all {devices.length} devices with filtering</p>
                       </button>
 
                       {securityMetrics.length > 0 && (
                         <button
                           onClick={() => setActiveTab('security')}
-                          className="bg-white rounded-xl shadow-lg border-2 border-red-200 p-4 hover:shadow-xl hover:-translate-y-1 transition-all text-left"
+                          className="bg-white rounded-xl shadow-2xl border-4 border-red-200 p-8 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:-translate-y-2 transition-all text-left"
                         >
-                          <Shield className="w-8 h-8 text-red-600 mb-2" />
-                          <h3 className="text-sm font-bold text-uva-navy">Security</h3>
+                          <Shield className="w-12 h-12 text-red-600 mb-4" />
+                          <h3 className="text-xl font-bold text-uva-navy mb-2">Security Dashboard</h3>
+                          <p className="text-gray-600">View vulnerability data and security metrics</p>
                         </button>
                       )}
 
                       <button
                         onClick={() => router.push('/analytics')}
-                        className="bg-white rounded-xl shadow-lg border-2 border-green-200 p-4 hover:shadow-xl hover:-translate-y-1 transition-all text-left"
+                        className="bg-white rounded-xl shadow-2xl border-4 border-green-200 p-8 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] hover:-translate-y-2 transition-all text-left"
                       >
-                        <BarChart3 className="w-8 h-8 text-green-600 mb-2" />
-                        <h3 className="text-sm font-bold text-uva-navy">Analytics</h3>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveTab('tools')}
-                        className="bg-white rounded-xl shadow-lg border-2 border-gray-200 p-4 hover:shadow-xl hover:-translate-y-1 transition-all text-left"
-                      >
-                        <Settings className="w-8 h-8 text-gray-600 mb-2" />
-                        <h3 className="text-sm font-bold text-uva-navy">Tools</h3>
+                        <BarChart3 className="w-12 h-12 text-green-600 mb-4" />
+                        <h3 className="text-xl font-bold text-uva-navy mb-2">Analytics & Charts</h3>
+                        <p className="text-gray-600">View detailed visualizations and reports</p>
                       </button>
                     </div>
                   </div>
@@ -977,28 +652,6 @@ export default function Home() {
                       >
                         Replacement ({summary.devicesNeedingReplacement})
                       </button>
-                      {summary.retiredCount > 0 && (
-                        <button
-                          onClick={() => setFilterView('retired')}
-                          className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                            filterView === 'retired'
-                              ? 'bg-gray-600 text-white shadow-lg'
-                              : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-gray-600'
-                          }`}
-                        >
-                          Retired ({summary.retiredCount})
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setFilterView('no-qualys')}
-                        className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                          filterView === 'no-qualys'
-                            ? 'bg-purple-600 text-white shadow-lg'
-                            : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-600'
-                        }`}
-                      >
-                        Missing Qualys ({devices.filter(d => !d.qualysAgentId && !d.isRetired).length})
-                      </button>
                     </div>
                     <p className="text-sm text-gray-600 italic mt-2">{filterInfo.description}</p>
                   </div>
@@ -1034,9 +687,6 @@ export default function Home() {
                       devices={displayedDevices}
                       title={filterInfo.title}
                       showExport={true}
-                      onToggleRetire={handleToggleRetire}
-                      onUpdateNotes={handleUpdateNotes}
-                      onUpdateOwner={handleUpdateOwner}
                     />
                   </div>
                 </div>
@@ -1153,37 +803,8 @@ export default function Home() {
                       devices={devices.filter(d => d.qualysAgentId && d.vulnerabilityCount && d.vulnerabilityCount > 0).slice(0, 50)}
                       title="Devices with Security Vulnerabilities"
                       showExport={true}
-                      onToggleRetire={handleToggleRetire}
-                      onUpdateNotes={handleUpdateNotes}
-                      onUpdateOwner={handleUpdateOwner}
                     />
                   </div>
-
-                  {/* Devices Missing Qualys */}
-                  {devices.filter(d => !d.qualysAgentId && !d.isRetired).length > 0 && (
-                    <div className="mb-8">
-                      <div className="flex items-center gap-2 mb-4">
-                        <AlertTriangle className="w-6 h-6 text-purple-600" />
-                        <h3 className="text-xl font-bold text-uva-navy">Missing Qualys Agent</h3>
-                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-bold">
-                          {devices.filter(d => !d.qualysAgentId && !d.isRetired).length} devices
-                        </span>
-                      </div>
-                      <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-4">
-                        <p className="text-sm text-purple-800">
-                          These devices do not have the Qualys agent installed. All managed devices should have Qualys for security monitoring.
-                        </p>
-                      </div>
-                      <DeviceTable
-                        devices={devices.filter(d => !d.qualysAgentId && !d.isRetired).slice(0, 50)}
-                        title="Devices Without Qualys Agent"
-                        showExport={true}
-                        onToggleRetire={handleToggleRetire}
-                        onUpdateNotes={handleUpdateNotes}
-                      onUpdateOwner={handleUpdateOwner}
-                      />
-                    </div>
-                  )}
 
                   {/* Link to Full Analytics */}
                   <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6">
@@ -1198,6 +819,144 @@ export default function Home() {
                       <BarChart3 className="w-5 h-5" />
                       View Full Analytics
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {/* LOANERS TAB */}
+              {activeTab === 'loaners' && (
+                <div className="animate-fade-in">
+                  <div className="flex items-center gap-3 mb-8">
+                    <Laptop className="w-8 h-8 text-uva-orange" />
+                    <h2 className="text-3xl font-serif font-bold text-uva-navy">
+                      Loaner Laptop Fleet
+                    </h2>
+                  </div>
+
+                  {/* Loaner Status Summary */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div className="bg-white rounded-xl shadow-lg border-2 border-green-200 p-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600 font-medium">Available</p>
+                          <p className="text-3xl font-bold text-green-600">--</p>
+                        </div>
+                        <CheckCircle className="w-10 h-10 text-green-500 opacity-50" />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">Ready for checkout</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-lg border-2 border-blue-200 p-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600 font-medium">Checked Out</p>
+                          <p className="text-3xl font-bold text-blue-600">--</p>
+                        </div>
+                        <User className="w-10 h-10 text-blue-500 opacity-50" />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">Currently on loan</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-lg border-2 border-yellow-200 p-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600 font-medium">Overdue</p>
+                          <p className="text-3xl font-bold text-yellow-600">--</p>
+                        </div>
+                        <Clock className="w-10 h-10 text-yellow-500 opacity-50" />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">Past due date</p>
+                    </div>
+                    <div className="bg-white rounded-xl shadow-lg border-2 border-red-200 p-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-600 font-medium">Maintenance</p>
+                          <p className="text-3xl font-bold text-red-600">--</p>
+                        </div>
+                        <AlertTriangle className="w-10 h-10 text-red-500 opacity-50" />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">Needs attention</p>
+                    </div>
+                  </div>
+
+                  {/* Coming Soon Notice */}
+                  <div className="bg-gradient-to-r from-uva-navy to-blue-800 rounded-xl p-8 text-white mb-8">
+                    <h3 className="text-2xl font-bold mb-4">Loaner Management Coming Soon</h3>
+                    <p className="text-blue-100 mb-6">
+                      This section will allow you to track your loaner laptop fleet with features including:
+                    </p>
+                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        Check-in / Check-out tracking
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        Borrower information and history
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        Due date reminders and overdue alerts
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        Device condition tracking
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        Maintenance and repair logs
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                        Utilization reports and analytics
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Quick Actions */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <button className="bg-white rounded-xl shadow-lg border-2 border-gray-200 p-6 hover:border-green-400 hover:shadow-xl transition-all text-left group">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-green-100 rounded-lg group-hover:bg-green-200 transition-colors">
+                          <CheckCircle className="w-6 h-6 text-green-600" />
+                        </div>
+                        <h4 className="font-semibold text-uva-navy">Check Out Laptop</h4>
+                      </div>
+                      <p className="text-sm text-gray-600">Assign a loaner to a user</p>
+                    </button>
+                    <button className="bg-white rounded-xl shadow-lg border-2 border-gray-200 p-6 hover:border-blue-400 hover:shadow-xl transition-all text-left group">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-blue-100 rounded-lg group-hover:bg-blue-200 transition-colors">
+                          <Database className="w-6 h-6 text-blue-600" />
+                        </div>
+                        <h4 className="font-semibold text-uva-navy">Check In Laptop</h4>
+                      </div>
+                      <p className="text-sm text-gray-600">Return a loaner to inventory</p>
+                    </button>
+                    <button className="bg-white rounded-xl shadow-lg border-2 border-gray-200 p-6 hover:border-orange-400 hover:shadow-xl transition-all text-left group">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-orange-100 rounded-lg group-hover:bg-orange-200 transition-colors">
+                          <AlertTriangle className="w-6 h-6 text-orange-600" />
+                        </div>
+                        <h4 className="font-semibold text-uva-navy">Report Issue</h4>
+                      </div>
+                      <p className="text-sm text-gray-600">Log maintenance or damage</p>
+                    </button>
+                  </div>
+
+                  {/* Loaner Fleet Table Placeholder */}
+                  <div className="bg-white rounded-xl shadow-lg border-2 border-gray-200 p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-xl font-bold text-uva-navy">Loaner Fleet Inventory</h3>
+                      <button className="px-4 py-2 bg-uva-orange text-white rounded-lg font-semibold hover:bg-uva-orange-light transition-colors text-sm">
+                        + Add Loaner Device
+                      </button>
+                    </div>
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+                      <Laptop className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500 font-medium mb-2">No loaner devices configured</p>
+                      <p className="text-sm text-gray-400">
+                        Upload a loaner inventory CSV or add devices manually to get started
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1315,209 +1074,7 @@ export default function Home() {
                   )}
                 </div>
               )}
-
-              {/* INVENTORY TAB */}
-              {activeTab === 'inventory' && (
-                <div className="animate-fade-in">
-                  {/* Header with Add Button */}
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-                    <div className="flex items-center gap-3">
-                      <Package className="w-8 h-8 text-purple-600" />
-                      <div>
-                        <h2 className="text-3xl font-serif font-bold text-uva-navy">
-                          Inventory Management
-                        </h2>
-                        <p className="text-gray-600">Track expensive items, equipment, and assets</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setEditingItem(null)
-                        setShowInventoryForm(true)
-                      }}
-                      className="px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold
-                               hover:bg-purple-700 transition-colors flex items-center gap-2"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Add Item
-                    </button>
-                  </div>
-
-                  {/* Summary Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-purple-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <Package className="w-6 h-6 text-purple-600" />
-                        <span className="text-sm font-semibold text-gray-600">Total Items</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-uva-navy">{inventorySummary.totalItems}</p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-green-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <DollarSign className="w-6 h-6 text-green-600" />
-                        <span className="text-sm font-semibold text-gray-600">Total Value</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-green-600">
-                        ${inventorySummary.totalValue.toLocaleString()}
-                      </p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-yellow-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <AlertTriangle className="w-6 h-6 text-yellow-600" />
-                        <span className="text-sm font-semibold text-gray-600">Warranty Expiring</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-yellow-600">{inventorySummary.warrantyExpiringSoon}</p>
-                      <p className="text-xs text-gray-500">Within 90 days</p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-blue-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <Clock className="w-6 h-6 text-blue-600" />
-                        <span className="text-sm font-semibold text-gray-600">Recently Added</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-blue-600">{inventorySummary.recentlyAdded}</p>
-                      <p className="text-xs text-gray-500">Last 30 days</p>
-                    </div>
-                  </div>
-
-                  {/* Inventory Table */}
-                  {inventoryItems.length === 0 ? (
-                    <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-12 text-center">
-                      <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                      <h3 className="text-xl font-bold text-uva-navy mb-2">No Inventory Items</h3>
-                      <p className="text-gray-600 mb-6">
-                        Start tracking your expensive equipment, monitors, printers, and other assets.
-                      </p>
-                      <button
-                        onClick={() => {
-                          setEditingItem(null)
-                          setShowInventoryForm(true)
-                        }}
-                        className="px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold
-                                 hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
-                      >
-                        <Plus className="w-5 h-5" />
-                        Add Your First Item
-                      </button>
-                    </div>
-                  ) : (
-                    <InventoryTable
-                      items={inventoryItems}
-                      onEdit={handleInventoryEdit}
-                      onDelete={handleInventoryDelete}
-                      title="All Inventory Items"
-                    />
-                  )}
-                </div>
-              )}
-
-              {/* LOANERS TAB */}
-              {activeTab === 'loaners' && (
-                <div className="animate-fade-in">
-                  {/* Header with Add Button */}
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-                    <div className="flex items-center gap-3">
-                      <MonitorSmartphone className="w-8 h-8 text-cyan-600" />
-                      <div>
-                        <h2 className="text-3xl font-serif font-bold text-uva-navy">
-                          Loaner Laptop Management
-                        </h2>
-                        <p className="text-gray-600">Track loaner devices, checkouts, and returns</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setEditingLoaner(null)
-                        setLoanerFormMode('add')
-                        setShowLoanerForm(true)
-                      }}
-                      className="px-6 py-3 bg-cyan-600 text-white rounded-lg font-semibold
-                               hover:bg-cyan-700 transition-colors flex items-center gap-2"
-                    >
-                      <Plus className="w-5 h-5" />
-                      Add Loaner
-                    </button>
-                  </div>
-
-                  {/* Summary Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-cyan-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <MonitorSmartphone className="w-6 h-6 text-cyan-600" />
-                        <span className="text-sm font-semibold text-gray-600">Total Loaners</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-uva-navy">{loanerSummary.totalLoaners}</p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-green-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <CheckCircle className="w-6 h-6 text-green-600" />
-                        <span className="text-sm font-semibold text-gray-600">Available</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-green-600">{loanerSummary.available}</p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-yellow-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <User className="w-6 h-6 text-yellow-600" />
-                        <span className="text-sm font-semibold text-gray-600">Checked Out</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-yellow-600">{loanerSummary.checkedOut}</p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-red-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <AlertTriangle className="w-6 h-6 text-red-600" />
-                        <span className="text-sm font-semibold text-gray-600">Overdue</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-red-600">{loanerSummary.overdueCount}</p>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-2xl border-4 border-blue-200 p-6">
-                      <div className="flex items-center gap-3 mb-2">
-                        <Clock className="w-6 h-6 text-blue-600" />
-                        <span className="text-sm font-semibold text-gray-600">In Maintenance</span>
-                      </div>
-                      <p className="text-3xl font-serif font-bold text-blue-600">{loanerSummary.inMaintenance}</p>
-                    </div>
-                  </div>
-
-                  {/* Loaner Table */}
-                  {loanerLaptops.length === 0 ? (
-                    <div className="bg-white rounded-2xl shadow-lg border-2 border-gray-200 p-12 text-center">
-                      <MonitorSmartphone className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                      <h3 className="text-xl font-bold text-uva-navy mb-2">No Loaner Laptops</h3>
-                      <p className="text-gray-600 mb-6">
-                        Start tracking your loaner laptop pool for temporary device assignments.
-                      </p>
-                      <button
-                        onClick={() => {
-                          setEditingLoaner(null)
-                          setLoanerFormMode('add')
-                          setShowLoanerForm(true)
-                        }}
-                        className="px-6 py-3 bg-cyan-600 text-white rounded-lg font-semibold
-                                 hover:bg-cyan-700 transition-colors inline-flex items-center gap-2"
-                      >
-                        <Plus className="w-5 h-5" />
-                        Add Your First Loaner
-                      </button>
-                    </div>
-                  ) : (
-                    <LoanerTable
-                      loaners={loanerLaptops}
-                      loanHistory={loanHistory}
-                      onEdit={handleLoanerEdit}
-                      onDelete={handleLoanerDelete}
-                      onCheckout={handleLoanerCheckout}
-                      onReturn={handleLoanerReturn}
-                      title="All Loaner Laptops"
-                    />
-                  )}
-                </div>
-              )}
+            </div>{/* End Tab Content Panel */}
             </>
           )}
         </section>
@@ -1530,32 +1087,6 @@ export default function Home() {
         <CSVUploader
           onUpload={handleCSVUpload}
           onClose={handleCSVUploadComplete}
-        />
-      )}
-
-      {/* Inventory Form Modal */}
-      {showInventoryForm && (
-        <InventoryForm
-          item={editingItem}
-          onSave={handleInventorySave}
-          onClose={() => {
-            setShowInventoryForm(false)
-            setEditingItem(null)
-          }}
-        />
-      )}
-
-      {/* Loaner Form Modal */}
-      {showLoanerForm && (
-        <LoanerForm
-          loaner={editingLoaner}
-          onSave={handleLoanerSave}
-          onClose={() => {
-            setShowLoanerForm(false)
-            setEditingLoaner(null)
-            setLoanerFormMode('add')
-          }}
-          mode={loanerFormMode}
         />
       )}
     </div>

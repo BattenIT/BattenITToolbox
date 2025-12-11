@@ -70,6 +70,11 @@ export interface Device {
   statusReason?: string; // Detailed explanation of why device has this status
   statusReasons?: string[]; // Array of all factors contributing to status
 
+  // Value & Depreciation
+  estimatedMSRP?: number; // Original retail price estimate
+  currentValue?: number; // Current estimated value after depreciation
+  depreciationPercent?: number; // Percentage of value depreciated
+
   // Retirement flag - allows marking devices as retired without removing from data
   isRetired?: boolean;
 }
@@ -93,6 +98,10 @@ export interface DeviceSummary {
   totalVulnerabilities?: number;
   criticalVulnerabilities?: number;
   averageTruRiskScore?: number;
+  // Fleet value metrics
+  totalMSRP?: number; // Total original value of all devices
+  totalCurrentValue?: number; // Total current depreciated value
+  averageDeviceValue?: number; // Average current value per device
 }
 
 export interface DeviceFilter {

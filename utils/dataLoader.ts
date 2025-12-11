@@ -383,6 +383,14 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
     ? devicesWithTruRisk.reduce((sum, d) => sum + (d.truRiskScore || 0), 0) / devicesWithTruRisk.length
     : undefined
 
+  // Fleet value metrics
+  const devicesWithValue = activeDeviceList.filter(d => d.estimatedMSRP && d.estimatedMSRP > 0)
+  const totalMSRP = devicesWithValue.reduce((sum, d) => sum + (d.estimatedMSRP || 0), 0)
+  const totalCurrentValue = devicesWithValue.reduce((sum, d) => sum + (d.currentValue || 0), 0)
+  const averageDeviceValue = devicesWithValue.length > 0
+    ? totalCurrentValue / devicesWithValue.length
+    : undefined
+
   return {
     totalDevices,
     criticalCount,
@@ -401,6 +409,10 @@ export function calculateDeviceSummary(devices: Device[]): DeviceSummary {
     totalVulnerabilities,
     criticalVulnerabilities,
     averageTruRiskScore: averageTruRiskScore ? parseFloat(averageTruRiskScore.toFixed(1)) : undefined,
+    // Fleet value
+    totalMSRP,
+    totalCurrentValue,
+    averageDeviceValue: averageDeviceValue ? Math.round(averageDeviceValue) : undefined,
   }
 }
 
