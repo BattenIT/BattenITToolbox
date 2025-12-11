@@ -212,6 +212,12 @@ export default function DeviceTable({
                 Age {sortField === 'ageInYears' && (sortDirection === 'asc' ? '↑' : '↓')}
               </th>
               <th
+                onClick={() => handleSort('currentValue')}
+                className="px-4 py-3 text-left text-sm font-semibold text-uva-navy cursor-pointer hover:bg-gray-100"
+              >
+                Value {sortField === 'currentValue' && (sortDirection === 'asc' ? '↑' : '↓')}
+              </th>
+              <th
                 onClick={() => handleSort('status')}
                 className="px-4 py-3 text-left text-sm font-semibold text-uva-navy cursor-pointer hover:bg-gray-100"
               >
@@ -231,7 +237,7 @@ export default function DeviceTable({
           <tbody className="divide-y divide-gray-200">
             {sortedDevices.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
                   No devices found matching your criteria
                 </td>
               </tr>
@@ -287,6 +293,20 @@ export default function DeviceTable({
                       </span>
                     </td>
                     <td className="px-4 py-4">
+                      {device.currentValue ? (
+                        <span className={`text-sm font-semibold ${
+                          device.isRetired ? 'text-gray-400' :
+                          device.currentValue < 300 ? 'text-red-600' :
+                          device.currentValue < 600 ? 'text-yellow-600' :
+                          'text-green-600'
+                        }`}>
+                          ${device.currentValue.toLocaleString()}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4">
                       {device.isRetired ? (
                         <span className="px-3 py-1 rounded-full text-xs font-semibold border bg-gray-50 text-gray-500 border-gray-300">
                           Retired
@@ -338,7 +358,7 @@ export default function DeviceTable({
                   {/* Expanded Detail Row */}
                   {expandedRows.has(device.id) && (
                     <tr key={`${device.id}-details`} className="bg-gray-50">
-                      <td colSpan={9} className="px-4 py-6">
+                      <td colSpan={10} className="px-4 py-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                           {/* Basic Info */}
                           <div className="space-y-3">

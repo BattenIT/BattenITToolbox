@@ -291,6 +291,52 @@ export default function DeviceDetailModal({ device, onClose, onToggleRetire, onU
                   )}
                 </div>
               </div>
+
+              {/* Value & Depreciation */}
+              {device.estimatedMSRP && (
+                <div className="bg-green-50 rounded-xl p-4 border border-green-200">
+                  <h3 className="font-semibold text-green-800 flex items-center gap-2 mb-3">
+                    <span className="text-lg">$</span>
+                    Value & Depreciation
+                  </h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Original MSRP</span>
+                      <span className="font-medium">${device.estimatedMSRP.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Current Value</span>
+                      <span className={`font-bold text-lg ${
+                        device.currentValue && device.currentValue < 300 ? 'text-red-600' :
+                        device.currentValue && device.currentValue < 600 ? 'text-yellow-600' :
+                        'text-green-600'
+                      }`}>
+                        ${device.currentValue?.toLocaleString() || '0'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Depreciation</span>
+                      <span className="font-medium">{device.depreciationPercent || 0}%</span>
+                    </div>
+                    {/* Visual depreciation bar */}
+                    <div className="mt-3 pt-3 border-t border-green-200">
+                      <div className="w-full bg-gray-200 rounded-full h-3">
+                        <div
+                          className={`h-3 rounded-full transition-all ${
+                            (device.depreciationPercent || 0) >= 80 ? 'bg-red-500' :
+                            (device.depreciationPercent || 0) >= 50 ? 'bg-yellow-500' :
+                            'bg-green-500'
+                          }`}
+                          style={{ width: `${100 - (device.depreciationPercent || 0)}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1 text-center">
+                        {100 - (device.depreciationPercent || 0)}% of original value remaining
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right Column - Security & Status */}
